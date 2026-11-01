@@ -1,21 +1,43 @@
-// Store art: one staged, deterministic frame per poster, drawn with the game's own renderer from real (simulated) play.
+// Store art: one staged, frozen frame per poster, drawn with the game's own 3D renderer from real (simulated) play. The
+// badges are flat symbols on discs, drawn in 2D.
 
 import { T, SEATS, PALETTE, DELIVERY, angleDiff } from './config.js';
 import { TOWNS, TITLE_TOWN } from './towns.js';
-import { createRenderer } from './render.js';
-import { createScrambleWorld } from './world.js';
+import { createRenderer } from './gfx/renderer.js';
+import { createMarksLayer } from './gfx/marks-layer.js';
+import { createTrafficLayer } from './gfx/traffic-layer.js';
+import { createPeopleLayer } from './gfx/people-layer.js';
+import { createVansLayer } from './gfx/vans-layer.js';
+import { createFxLayer } from './gfx/fx-layer.js';
+import { createWeatherLayer } from './gfx/weather-layer.js';
+import { loadModels } from './gfx/models.js';
+import { createScrambleWorld, cityFor } from './world.js';
 import { openList } from './scramble.js';
 import { createFx } from './fx.js';
-import { drawPodium } from './yard.js';
+import { createForecourt, forecourtCity } from './forecourt.js';
 import { outlined, plates, clockSign } from './hud.js';
 import { tileDrivable } from './city.js';
 import { vanSprite, vanShadow, curl, bigParcel, rr, shade } from './sprites.js';
 
 const BODIES = ['box', 'bread', 'pickup', 'mail', 'tuk', 'icecream'];
 const NAMES = ['Mo', 'Rosa', 'Dex', 'Juno', 'Pip', 'Vik'];
+const DEG = Math.PI / 180;
+const raf = () => new Promise((r) => requestAnimationFrame(r));
+
+/** The same picture every time: a seeded Math.random for the people, the puffs and the particles. */
+function seedRandom(seed) {
+  let a = seed >>> 0;
+  Math.random = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export async function renderPoster(name) {
-  const badge = name.startsWith('badge-');
+  seedRandom(7);
   const W = innerWidth;
   const H = innerHeight;
   try {
@@ -25,16 +47,44 @@ export async function renderPoster(name) {
     /* draw with what we have */
   }
   const cv = document.getElementById('cv');
-  const R = createRenderer(cv);
+  if (name.startsWith('badge-')) {
+    cv.width = W;
+    cv.height = H;
+    drawBadge(cv.getContext('2d'), W, name.slice(6));
+    await raf();
+    document.body.dataset.ready = '1';
+    return;
+  }
+  const R = createRenderer(cv, { preserve: true });
   R.resize(W, H, 1);
   R.quality = 'high';
-  if (badge) drawBadge(R.ctx, W, name.slice(6));
-  else if (name === 'icon') drawIcon(R.ctx, W);
-  else if (name === 'win') drawWin(R, W, H);
-  else if (name === 'action') drawAction(R, W, H);
-  else if (name === 'multi') drawMulti(R, W, H);
-  else drawCover(R, W, H);
-  requestAnimationFrame(() => requestAnimationFrame(() => (document.body.dataset.ready = '1')));
+  const people = createPeopleLayer(R);
+  R.layers.push(createMarksLayer(R), createTrafficLayer(R), people, createVansLayer(R), createFxLayer(R), createWeatherLayer(R));
+  R.greet = people.greet;
+  R.sound = () => {};
+  await loadModels();
+  await raf();
+  const fx = createFx();
+  const shot = { icon: iconShot, action: actionShot, win: winShot, multi: multiShot }[name] || coverShot;
+  const p = shot(R, W, H, fx);
+  const view = p.view;
+  view.fx = fx;
+  view.paint = (view.paint || []).concat(fx.paint);
+  // Let it come to life (springs, people at their doors, puffs), then freeze.
+  if (p.greet) for (const g of p.greet) R.greet(g.id, g.o || {});
+  const until = performance.now() + (p.settle ?? 1.4) * 1000;
+  while (performance.now() < until) {
+    R.frame(view);
+    await raf();
+  }
+  R.frame(view);
+  if (p.hud) {
+    R.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    p.hud(R.ctx, R);
+  }
+  await raf();
+  await raf();
+  document.body.dataset.ready = '1';
 }
 
 // ---------------------------------------------------------------- simulated play
@@ -47,14 +97,17 @@ function drivers(n, skill = 0.85) {
 /** Run a scramble, leaving tyre marks on the renderer, calling pick(world, step) each step; returns the world. */
 function run(R, town, opts, steps, pick) {
   const w = createScrambleWorld(town, opts);
-  R.setCity(w.city);
-  R.clearMarks();
+  if (R) {
+    R.setCity(w.city);
+    R.clearMarks();
+  }
   for (let i = 0; i < steps; i++) {
     w.step();
-    for (const r of w.runners) {
-      const v = r.van;
-      if (v.hold && v.v > 150 && i % 2 === 0) R.mark(v.x - Math.cos(v.h) * 14, v.y - Math.sin(v.h) * 14, v.h, w.city.snow ? 'snow' : 'tyre');
-    }
+    if (R)
+      for (const r of w.runners) {
+        const v = r.van;
+        if (v.hold && v.v > 150 && i % 2 === 0) R.mark(v.x - Math.cos(v.h) * 14, v.y - Math.sin(v.h) * 14, v.h, w.city.snow ? 'snow' : 'tyre');
+      }
     if (pick) pick(w, i);
   }
   return w;
@@ -76,22 +129,19 @@ function vansOf(w) {
   }));
 }
 
-function addrView(w) {
+function addrView(R, w) {
   const open = openList(w.city, w.data);
   return {
     open,
     rings: open.map((o) => ({ x: o.house.dropX, y: o.house.dropY, gold: o.gold })),
-    beacons: open.map((o) => ({ x: o.house.doorX, y: o.house.doorY - 10, gold: o.gold, scale: o.gold ? 1.3 : 1 })),
+    beacons: open.map((o) => ({ ...R.matAt(o.house), gold: o.gold, scale: o.gold ? 1.3 : 1 })),
   };
 }
 
 function weather(view, town, t) {
-  if (town.night) Object.assign(view, { dark: 0.8, darkColor: '#0B1030', neon: true });
-  else if (town.dusk) Object.assign(view, { dark: 0.42, darkColor: '#3A1F3A' });
-  else if (town.rain) view.rain = true;
+  if (town.rain) view.rain = true;
   if (town.snow) view.snow = true;
   view.t = t;
-  view.reduced = true;
   view.bakeAll = true;
 }
 
@@ -113,93 +163,60 @@ function chevrons(open, vans) {
   return out;
 }
 
+/** A parcel in flight from a van to a house, `k` of the way there. */
+function inFlight(fx, v, house, k, gold = false) {
+  fx.add('throw', { x0: v.x, y0: v.y, x1: house.doorX, y1: house.doorY, house: house.id, gold, dur: 0.5 });
+  fx.throws[fx.throws.length - 1].t = 0.5 * k;
+}
+
 // ---------------------------------------------------------------- the posters
 
-/** The title street, mid-scramble: the name painted on the avenue, a van delivering past it. */
-function drawCover(R, W, H) {
-  // Find the moment a van is in a ring in the shot and the most vans are in it, none of them on the words.
-  const target = { x: 5.5 * T, y: 4 * T };
-  let best = -Infinity;
-  let at = 600;
-  const opts = { seed: 11, seconds: 1e9, drivers: drivers(4, 0.95) };
-  const inFrame = (x, y) => Math.abs(x - target.x) < 360 && Math.abs(y - target.y) < 200;
-  run(R, TITLE_TOWN, opts, 2400, (w, i) => {
-    if (i < 600) return;
-    const open = openList(w.city, w.data);
-    let s = 0;
-    for (const r of w.runners) {
-      if (inFrame(r.van.x, r.van.y)) s += 1;
-      if (Math.abs(r.van.x - target.x) < 110 && Math.abs(r.van.y - 4.15 * T) < 170) s -= 3;
-      for (const o of open) {
-        const d = Math.hypot(o.house.dropX - r.van.x, o.house.dropY - r.van.y);
-        if (d < 50 && inFrame(r.van.x, r.van.y)) s += 3 - d / 50;
-      }
-    }
-    // A ring painted over the words muddles them.
-    for (const o of open) if (Math.abs(o.house.dropX - target.x) < 150 && Math.abs(o.house.dropY - 4.15 * T) < 200) s -= 2;
-    if (s > best) {
-      best = s;
-      at = i;
-    }
-  });
-  const w = run(R, TITLE_TOWN, opts, at + 1);
-  const a = addrView(w);
-  const vans = vansOf(w);
-  // The van delivering is the courier-yellow one (seat colours are only paint).
-  let hero = -1;
-  let heroHouse = null;
-  let near = 50;
-  vans.forEach((v, i) => {
-    for (const o of a.open) {
-      const d = Math.hypot(o.house.dropX - v.x, o.house.dropY - v.y);
-      if (d < near && inFrame(v.x, v.y)) {
-        near = d;
-        hero = i;
-        heroHouse = o.house;
-      }
-    }
-  });
-  if (hero > 0) {
-    const tmp = { color: vans[0].color, body: vans[0].body, symbol: vans[0].symbol };
-    Object.assign(vans[0], { color: vans[hero].color, body: vans[hero].body, symbol: vans[hero].symbol });
-    Object.assign(vans[hero], tmp);
-  }
-  const fx = createFx();
-  if (heroHouse) {
-    const v = vans[Math.max(0, hero)];
-    fx.add('throw', { x0: v.x, y0: v.y, x1: heroHouse.doorX, y1: heroHouse.doorY, gold: false, dur: 0.42 });
-    fx.throws[0].t = 0.18;
-  }
-  const zoom = Math.min(H / 560, W / 700) * 1.15;
+/** The title street: the name painted on the avenue, the yellow van throwing a parcel to a door, rivals on the way. */
+function coverShot(R, W, H, fx) {
+  const w = run(R, TITLE_TOWN, { seed: 11, seconds: 1e9, drivers: drivers(3, 0.95) }, 900);
+  const city = w.city;
+  const house = (id) => city.houses.find((h) => h.id === id);
+  const hero = { x: 5.5 * T - 22, y: 5.5 * T, h: -Math.PI / 2 + 0.06, v: 210, hold: false, braking: false, color: PALETTE.yellow, body: 'box', parcels: 2 };
+  const vans = [
+    hero,
+    { x: 5.5 * T + 22, y: 2.55 * T, h: Math.PI / 2, v: 230, color: SEATS[1].color, body: 'bread', parcels: 3 },
+    { x: 7.4 * T, y: 1.5 * T - 26, h: 0.02, v: 220, color: SEATS[2].color, body: 'mail', parcels: 1 },
+  ];
+  const to = house(17);
+  inFlight(fx, hero, to, 0.42);
+  // Traffic, but none on the words.
+  const cars = w.env.cars.filter((c) => !(Math.abs(c.x - 5.5 * T) < 80 && c.y > 2.8 * T && c.y < 5.6 * T));
+  const beacons = [house(4), house(13), house(8)].map((h, k) => ({ ...R.matAt(h), gold: k === 0, scale: k === 0 ? 1.3 : 1 }));
+  const zoom = Math.min(H / 520, W / 640) * 1.18;
   const view = {
-    cam: { x: 5.5 * T, y: 3.95 * T, zoom, shake: [0, 0] },
-    env: w.env,
+    cam: { x: 5.5 * T, y: 4.45 * T, zoom, pitch: 48 * DEG, shake: [0, 0] },
+    env: { ...w.env, cars },
     vans,
-    rings: a.rings,
-    beacons: a.beacons,
+    beacons,
+    tilt: 0.55,
+    band: 0.26,
+    focusY: 0.5,
     paint: [
       { lines: ['RIGHT', 'TURNS', 'ONLY'], x: 5.5 * T, y: 4.15 * T, upright: true, width: 112, max: 80, stretch: 1.3, alpha: 1 },
       { arrow: true, x: 5.5 * T, y: 2.4 * T, size: 40, alpha: 1 },
     ],
   };
-  view.drawWorldFx = (g) => fx.drawWorld(g);
   weather(view, TITLE_TOWN, w.t);
-  R.frame(view);
+  return { view, greet: [{ id: to.id }], settle: 1.6 };
 }
 
-/** A close-up at night: a van swinging right past a lit address, the parcel in the air. */
-function drawAction(R, W, H) {
-  const town = TOWNS.find((t) => t.night) || TOWNS[6];
+/** A close-up: the van swinging right past an address, tyres smoking, the parcel in the air. */
+function actionShot(R, W, H, fx) {
+  const town = TOWNS[0];
   const opts = { seed: 4, seconds: 1e9, drivers: drivers(5, 0.9) };
   let best = -1;
   let at = 900;
-  let pickData = null;
-  run(R, town, opts, 3600, (w, i) => {
+  let pick = null;
+  run(null, town, opts, 3600, (w, i) => {
     if (i < 600) return;
     const r = w.runners[0];
     if (!r.van.hold || r.van.v < 120) return;
-    const open = openList(w.city, w.data);
-    for (const o of open) {
+    for (const o of openList(w.city, w.data)) {
       const d = Math.hypot(o.house.dropX - r.van.x, o.house.dropY - r.van.y);
       if (d > 60) continue;
       const others = w.runners.slice(1).filter((q) => Math.hypot(q.van.x - r.van.x, q.van.y - r.van.y) < 260).length;
@@ -207,77 +224,63 @@ function drawAction(R, W, H) {
       if (s > best) {
         best = s;
         at = i;
-        pickData = o.house.id;
+        pick = o.house.id;
       }
     }
   });
   const w = run(R, town, opts, at + 1);
-  const a = addrView(w);
+  const a = addrView(R, w);
   const van = w.runners[0].van;
+  const vans = vansOf(w);
+  Object.assign(vans[0], { color: PALETTE.yellow, body: 'box' });
+  // Behind and beside the van, looking where it is going.
+  const yaw = Math.atan2(-Math.cos(van.h), -Math.sin(van.h)) + 0.75;
   const view = {
-    cam: { x: van.x + Math.cos(van.h) * 40, y: van.y + Math.sin(van.h) * 40, zoom: Math.min(W, H) / 330, shake: [0, 0] },
+    cam: { x: van.x + Math.cos(van.h) * 30, y: van.y + Math.sin(van.h) * 30, zoom: Math.min(W, H) / 240, pitch: 34 * DEG, yaw, shake: [0, 0] },
     env: w.env,
-    vans: vansOf(w),
+    vans,
     rings: a.rings,
     beacons: a.beacons,
+    tilt: 0.8,
+    band: 0.2,
+    focusY: 0.45,
   };
-  // The parcel already on its way to the porch.
-  const house = w.city.houses.find((h) => h.id === pickData) || null;
-  const fx = createFx();
+  const house = w.city.houses.find((h) => h.id === pick) || null;
+  const greet = [];
   if (house) {
-    fx.add('throw', { x0: van.x, y0: van.y, x1: house.doorX, y1: house.doorY, gold: false, dur: 0.42 });
-    fx.throws[0].t = 0.2;
-    fx.spawn(van.x - Math.cos(van.h) * 20, van.y - Math.sin(van.h) * 20, 14, { color: ['#FFD27A', '#FFFFFF'], speed: 120, life: 0.6, size: 3 });
-    fx.update(0.1);
+    inFlight(fx, van, house, 0.4);
+    greet.push({ id: house.id });
   }
-  view.drawWorldFx = (g) => fx.drawWorld(g);
+  // Tyre smoke off the rear wheels and a spray of sparks.
+  const bx = van.x - Math.cos(van.h) * 20;
+  const by = van.y - Math.sin(van.h) * 20;
+  for (const side of [-1, 1]) fx.spawn(bx - Math.sin(van.h) * 9 * side, by + Math.cos(van.h) * 9 * side, 10, { color: '#D9D7E4', kind: 2, speed: 30, up: 14, life: 1.2, size: 6, z: 2, dir: van.h + Math.PI, spread: 1.4 });
+  for (let i = 0; i < 6; i++) fx.update(0.05);
   weather(view, town, w.t);
-  R.frame(view);
+  return { view, greet, settle: 1.3 };
 }
 
-/** The podium after a scramble: the winner's van spinning donuts, confetti. */
-function drawWin(R, W, H) {
-  const g = R.ctx;
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  const rows = [
-    { place: 1, name: 'Mo', pts: 31, color: SEATS[0].color, body: 0 },
-    { place: 2, name: 'Rosa', pts: 27, color: SEATS[1].color, body: 1 },
-    { place: 3, name: 'Dex', pts: 22, color: SEATS[2].color, body: 3 },
-  ];
-  drawPodium(g, W, H, rows, 0.43, 70, 40);
-  // Tyre donuts under the winner.
-  g.save();
-  g.strokeStyle = 'rgba(18,20,26,0.35)';
-  g.lineWidth = 6;
-  const unit = Math.min(W / 3.6, (H - 110) / 2.6, 220);
-  for (let k = 0; k < 2; k++) {
-    g.beginPath();
-    g.arc(W / 2, 70 + (H - 110) * 0.78 - unit * 0.85 - unit * 0.32, unit * (0.38 + k * 0.08), 0, Math.PI * 2);
-    g.stroke();
-  }
-  g.restore();
-  const fx = createFx();
-  for (let i = 0; i < 6; i++) fx.spawn(W / 2 + (i - 2.5) * 180, -30, 30, { dir: Math.PI / 2, spread: 2.4, speed: 520, life: 4, size: 11, kind: 1, color: ['#FFC22E', '#F0573C', '#3EA6F0', '#37C98A', '#F4F1E8', '#A174F2'], drag: 1.2, jitter: 120 });
-  fx.update(0.32);
-  fx.update(0.32);
-  fx.drawWorld(g);
-  outlined(g, 'SHIFT SCRAMBLE', W / 2, 52, 64, '#F4F1E8');
-  // The rest of the field on exit-sign plates along the bottom.
-  const rest = [
-    { place: 4, name: 'Juno', pts: 18, color: SEATS[3].color, symbol: SEATS[3].symbol },
-    { place: 5, name: 'Pip', pts: 15, color: SEATS[4].color, symbol: SEATS[4].symbol },
-    { place: 6, name: 'Vik', pts: 11, color: SEATS[5].color, symbol: SEATS[5].symbol },
-  ];
-  rest.forEach((r, k) => plates(g, W / 2 + (k - 1) * 240 - 105, H - 78, [r], 210));
+/** The podium at the depot after a scramble: the winner spinning on top, confetti in the air. */
+function winShot(R, W, H, fx) {
+  const court = createForecourt();
+  R.setCity(forecourtCity());
+  const rows = NAMES.slice(0, 5).map((n, i) => ({ place: i + 1, name: n, pts: [31, 27, 22, 18, 11][i], color: SEATS[i].color, symbol: SEATS[i].symbol, body: [0, 1, 3, 2, 5][i], topper: ['crown', 'cone', 'none', 'duck', 'none'][i] }));
+  const view = court.podium({ w: W, h: H }, rows, 0.6, 0.016, { top: 40, bottom: 30 }, null);
+  Object.assign(view.cam, { shake: [0, 0] });
+  // Confetti thrown high over the plinths, caught on its way down.
+  for (let i = 0; i < 7; i++) fx.spawn(3.5 * T + (i - 3) * 50, 7.5 * T + ((i * 37) % 60) - 30, 34, { color: ['#FFC22E', '#F0573C', '#3EA6F0', '#37C98A', '#F4F1E8', '#A174F2'], kind: 1, speed: 160, up: 520, life: 4, size: 6, z: 30, jitter: 60 });
+  for (let i = 0; i < 14; i++) fx.update(0.05);
+  const hud = view.hud;
+  return { view, settle: 1.2, hud: (g, R2) => hud(g, R2) };
 }
 
 /** Six vans converging on the golden last call, with the standings and the clock. */
-function drawMulti(R, W, H) {
+function multiShot(R, W, H) {
   const town = TOWNS.find((t) => t.name === 'Fiveways') || TOWNS[2];
   const opts = { seed: 3, seconds: 70, drivers: drivers(6, 0.85) };
   let best = -1;
   let at = 3000;
-  run(R, town, opts, 70 * 60 - 2, (w, i) => {
+  run(null, town, opts, 70 * 60 - 2, (w, i) => {
     if (!w.data.lastCall) return;
     const gold = openList(w.city, w.data).find((o) => o.gold);
     if (!gold) return;
@@ -292,35 +295,50 @@ function drawMulti(R, W, H) {
     }
   });
   const w = run(R, town, opts, at + 1);
-  const a = addrView(w);
+  const a = addrView(R, w);
   const gold = a.open.find((o) => o.gold);
   const vans = vansOf(w).map((v, i) => ({ ...v, tag: NAMES[i] }));
   const c = gold ? { x: gold.house.dropX, y: gold.house.dropY } : { x: w.city.W / 2, y: w.city.H / 2 };
-  const zoom = Math.min(W / 1000, H / 560);
+  const zoom = Math.min(W / 900, H / 520);
   const side = 250; // px of plates on the right
-  const cam = { x: c.x + side / 2 / zoom, y: c.y + 20, zoom, shake: [0, 0] };
+  const cam = { x: c.x + (side / 2 / zoom) * Math.sin(55 * DEG), y: c.y + 30, zoom, pitch: 55 * DEG, shake: [0, 0] };
   stage(w.city, vans, c, { x0: cam.x - W / 2 / zoom, x1: cam.x + (W / 2 - side) / zoom, y0: cam.y - H / 2 / zoom, y1: cam.y + H / 2 / zoom });
-  const view = {
-    cam,
-    env: w.env,
-    vans,
-    rings: a.rings,
-    beacons: a.beacons,
-    chevrons: chevrons(a.open, vans),
-  };
+  const view = { cam, env: w.env, vans, rings: a.rings, beacons: a.beacons, chevrons: chevrons(a.open, vans), tilt: 0.5, band: 0.3 };
   weather(view, town, w.t);
-  R.frame(view);
-  // The scramble HUD, as in the game.
-  const g = R.ctx;
-  g.setTransform(1, 0, 0, 1, 0, 0);
   const rows = w.runners
     .map((r, i) => ({ name: NAMES[i], pts: (w.data.pts && w.data.pts[r.seat]) || 0, color: SEATS[i].color, symbol: SEATS[i].symbol, me: i === 0 }))
     .sort((p, q) => q.pts - p.pts);
   rows.forEach((r, k) => (r.place = k > 0 && rows[k - 1].pts === r.pts ? rows[k - 1].place : k + 1));
-  clockSign(g, W - 72, 66, 46, '0:14', { red: true });
-  plates(g, W - 224, 132, rows, 210);
-  outlined(g, 'LAST CALL', W - 119, 132 + rows.length * 40 + 34, 44, '#FFD23F');
-  outlined(g, '×3', W - 119, 132 + rows.length * 40 + 82, 44, '#FFD23F');
+  const hud = (g) => {
+    clockSign(g, W - 72, 66, 46, '0:14', { red: true });
+    plates(g, W - 224, 132, rows, 210);
+    outlined(g, 'LAST CALL', W - 119, 132 + rows.length * 40 + 34, 44, '#FFD23F');
+    outlined(g, '×3', W - 119, 132 + rows.length * 40 + 82, 44, '#FFD23F');
+  };
+  return { view, hud, settle: 1.2 };
+}
+
+/** The icon: the yellow van close up, mid right turn, parcels on the roof, a right-turn arrow on the road. */
+function iconShot(R, W, H, fx) {
+  R.setCity(cityFor(TITLE_TOWN));
+  const x = 5.5 * T;
+  const y = 3.3 * T;
+  const h = -Math.PI / 2 + 0.3;
+  const vans = [{ x, y, h, v: 210, hold: true, color: PALETTE.yellow, body: 'box', parcels: 3, topper: 'none' }];
+  for (const side of [-1, 1]) fx.spawn(x - Math.cos(h) * 20 - Math.sin(h) * 9 * side, y - Math.sin(h) * 20 + Math.cos(h) * 9 * side, 8, { color: '#ECEAE4', kind: 2, speed: 26, up: 10, life: 1.4, size: 6, z: 2, dir: h + Math.PI, spread: 1.2 });
+  for (let i = 0; i < 8; i++) fx.update(0.05);
+  // In front of the van and to its left: the nose, the cab and the curl on the roof.
+  const yaw = Math.atan2(Math.cos(h), Math.sin(h)) - 0.75;
+  const view = {
+    t: 0,
+    env: { cars: [], closed: new Set() },
+    vans,
+    cam: { x: x - Math.sin(yaw) * 9, y: y - Math.cos(yaw) * 9, zoom: W / 165, pitch: 36 * DEG, yaw, shake: [0, 0] },
+    tilt: 0.7,
+    band: 0.24,
+    focusY: 0.5,
+  };
+  return { view, settle: 1.6 };
 }
 
 /**
@@ -379,31 +397,6 @@ function disc(g, S, color) {
   g.beginPath();
   g.arc(c, c, S * 0.395, 0, Math.PI * 2);
   g.stroke();
-}
-
-/** The icon: the yellow van riding the brand's right-turn curl on a blue road sign. */
-function drawIcon(g, S) {
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  g.fillStyle = PALETTE.blue;
-  g.fillRect(0, 0, S, S);
-  // A plate's white border, inside the safe area.
-  g.strokeStyle = '#F4F1E8';
-  g.lineWidth = S * 0.03;
-  rr(g, S * 0.1, S * 0.1, S * 0.8, S * 0.8, S * 0.09);
-  g.stroke();
-  g.save();
-  g.translate(S / 2, S * 0.53);
-  curl(g, S * 0.42, '#F4F1E8', S * 0.11);
-  g.restore();
-  // The van at the top of the curl, heading right.
-  const r = S * 0.42 * 0.62;
-  g.save();
-  g.translate(S / 2 - S * 0.02, S * 0.53 + S * 0.42 * 0.12 - r);
-  const k = S / 150;
-  g.scale(k, k);
-  g.drawImage(vanShadow().c, -32 + 4, -21 + 6, 64, 42);
-  g.drawImage(vanSprite('box', PALETTE.yellow).c, -28, -17, 56, 34);
-  g.restore();
 }
 
 function drawBadge(g, S, id) {
@@ -627,6 +620,93 @@ function drawBadge(g, S, id) {
         g.fill();
         g.stroke();
       }
+      g.restore();
+      break;
+    }
+    case 'full-flow': {
+      // Five bars, rising and full.
+      disc(g, S, '#1B2A55');
+      g.save();
+      g.translate(c, c + 6);
+      const cols = ['#5BC4A0', '#9BD35A', '#FFC22E', '#FF8A3C', '#F0573C'];
+      for (let i = 0; i < 5; i++) {
+        const bh = 26 + i * 16;
+        const x = -66 + i * 28;
+        g.fillStyle = ink;
+        rr(g, x - 3, 44 - bh - 3, 26, bh + 6, 6);
+        g.fill();
+        g.fillStyle = cols[i];
+        rr(g, x, 44 - bh, 20, bh, 4);
+        g.fill();
+      }
+      g.restore();
+      break;
+    }
+    case 'express': {
+      // A parcel with a lightning bolt, rushing.
+      disc(g, S, '#E2412E');
+      g.save();
+      g.translate(c + 8, c + 4);
+      g.strokeStyle = paint;
+      g.lineCap = 'round';
+      g.lineWidth = 9;
+      for (const [y, l] of [
+        [-26, 40],
+        [0, 56],
+        [26, 40],
+      ]) {
+        g.beginPath();
+        g.moveTo(-58 - l, y);
+        g.lineTo(-62, y);
+        g.stroke();
+      }
+      g.rotate(-0.12);
+      g.drawImage(bigParcel(false).c, -56, -56, 112, 112);
+      g.fillStyle = '#FFD23F';
+      g.strokeStyle = ink;
+      g.lineWidth = 5;
+      g.lineJoin = 'round';
+      g.beginPath();
+      g.moveTo(8, -40);
+      g.lineTo(-18, 6);
+      g.lineTo(0, 6);
+      g.lineTo(-8, 40);
+      g.lineTo(22, -8);
+      g.lineTo(4, -8);
+      g.closePath();
+      g.fill();
+      g.stroke();
+      g.restore();
+      break;
+    }
+    case 'senior-courier': {
+      // The courier's cap, with a star.
+      disc(g, S, PALETTE.yellow);
+      g.save();
+      g.translate(c, c + 18);
+      g.fillStyle = ink;
+      g.beginPath();
+      g.arc(0, 0, 66, Math.PI, 0);
+      g.closePath();
+      g.fill();
+      rr(g, -70, -6, 150, 22, 10);
+      g.fill();
+      g.fillStyle = '#1E5BC6';
+      g.beginPath();
+      g.arc(0, 0, 58, Math.PI, 0);
+      g.closePath();
+      g.fill();
+      rr(g, -62, -2, 136, 12, 6);
+      g.fill();
+      g.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        const r2 = i % 2 ? 9 : 21;
+        g.lineTo(Math.cos(a) * r2, -30 + Math.sin(a) * r2);
+      }
+      g.closePath();
+      g.fillStyle = PALETTE.yellow;
+      g.fill();
       g.restore();
       break;
     }

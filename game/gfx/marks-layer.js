@@ -72,8 +72,8 @@ varying vec2 vUv2;
 void main() {
   float y = vUv2.y;
   float edge = 1.0 - abs(vUv2.x - 0.5) * 2.0;
-  float a = (1.0 - y) * (0.35 + 0.15 * sin(uTime * 3.0 + y * 8.0)) * smoothstep(0.0, 0.6, edge);
-  gl_FragColor = vec4(uColor * 1.6, a);
+  float a = (1.0 - y * 0.85) * (0.5 + 0.18 * sin(uTime * 3.0 + y * 8.0)) * smoothstep(0.0, 0.6, edge);
+  gl_FragColor = vec4(uColor * 1.8, a);
 }
 `;
 
@@ -108,7 +108,8 @@ export function createMarksLayer(R) {
   };
   // Beacons: a parcel turning in the air over the house, a pillar of light under it.
   const beacons = [];
-  const pillarGeo = new THREE.CylinderGeometry(0.42, 0.42, 1, 16, 1, true);
+  // Wider at the foot: a cone of light standing on the doormat.
+  const pillarGeo = new THREE.CylinderGeometry(0.3, 0.75, 1, 20, 1, true);
   pillarGeo.translate(0, 0.5, 0);
   const pillarMat = (color) =>
     new THREE.ShaderMaterial({
@@ -122,19 +123,37 @@ export function createMarksLayer(R) {
       toneMapped: false,
     });
   const parcelMat = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, emissive: new THREE.Color('#000000') }), { patterns: false });
+  // A soft glow behind the parcel so it reads from far away and at night.
+  const haloTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const gr = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255,255,255,0.9)');
+    gr.addColorStop(0.35, 'rgba(255,255,255,0.35)');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 128, 128);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })();
   const beacon = (i) => {
     if (!beacons[i]) {
       const g = new THREE.Group();
       const p = new THREE.Mesh(parcelGeometry(false), parcelMat);
-      p.scale.setScalar(2.1);
+      p.scale.setScalar(2.8);
       p.castShadow = true;
       const gp = new THREE.Mesh(parcelGeometry(true), parcelMat);
-      gp.scale.setScalar(2.4);
+      gp.scale.setScalar(3.2);
       gp.castShadow = true;
       const pil = new THREE.Mesh(pillarGeo, pillarMat('#FFC22E'));
-      g.add(p, gp, pil);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex, color: '#FFC22E', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+      halo.scale.set(5.5, 5.5, 1);
+      halo.renderOrder = 3;
+      g.add(p, gp, pil, halo);
       group.add(g);
-      beacons[i] = { g, p, gp, pil };
+      beacons[i] = { g, p, gp, pil, halo };
     }
     return beacons[i];
   };
@@ -251,6 +270,11 @@ export function createMarksLayer(R) {
         pm.rotation.z = Math.sin(time.value * 1.9 + i) * 0.15;
         bc.pil.scale.set(1, hgt, 1);
         bc.pil.material.uniforms.uColor.value.set(b.gold ? '#FFD23F' : b.color || '#FFC22E');
+        bc.halo.position.set(0, hgt + bob + 0.4, 0);
+        const pulse = 1 + Math.sin(time.value * 4 + i) * 0.08;
+        bc.halo.scale.setScalar((b.gold ? 7 : 5.5) * pulse * (b.scale || 1));
+        bc.halo.material.color.set(b.gold ? '#FFD23F' : b.color || '#FFC22E');
+        bc.halo.material.opacity = 0.55 + R2.style.night * 0.35;
       });
       for (let i = bs.length; i < beacons.length; i++) beacons[i].g.visible = false;
       void t;

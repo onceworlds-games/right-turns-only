@@ -1,8 +1,5 @@
-// Juice: particles, flying parcels, rising numbers, sprayed road paint and camera shake. A fixed pool, no per-frame garbage.
-
-import { PALETTE } from './config.js';
-import { bigParcel } from './sprites.js';
-import { font } from './draw2d.js';
+// Juice: particles, flying parcels, rising numbers, sprayed road paint and camera shake, as state (the gfx layers draw it).
+// A fixed pool, no per-frame garbage.
 
 const MAX = 260;
 
@@ -139,79 +136,6 @@ export function createFx() {
     fx.rings.length = 0;
     fx.paint.length = 0;
     fx.trauma = 0;
-  };
-
-  /** Draw the world-space effects (called inside the world transform). */
-  fx.drawWorld = (g) => {
-    for (const r of fx.rings) {
-      const k = r.t / r.dur;
-      g.save();
-      g.globalAlpha = 1 - k;
-      g.strokeStyle = r.color;
-      g.lineWidth = 10 * (1 - k) + 2;
-      g.beginPath();
-      g.arc(r.x, r.y, 30 + k * 90, 0, Math.PI * 2);
-      g.stroke();
-      g.restore();
-    }
-    for (const p of parts) {
-      if (!p.on) continue;
-      const k = p.life / p.max;
-      g.globalAlpha = 1 - k * k;
-      g.fillStyle = p.color;
-      if (p.kind === 2) {
-        g.beginPath();
-        g.arc(p.x, p.y, p.size * (1 + k * 2), 0, Math.PI * 2);
-        g.fill();
-      } else if (p.kind === 1) {
-        g.save();
-        g.translate(p.x, p.y);
-        g.rotate(p.rot);
-        g.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.8);
-        g.restore();
-      } else {
-        g.beginPath();
-        g.arc(p.x, p.y, p.size * (1 - k * 0.5), 0, Math.PI * 2);
-        g.fill();
-      }
-    }
-    g.globalAlpha = 1;
-    for (const th of fx.throws) {
-      const k = Math.min(1, th.t / th.dur);
-      const x = th.x0 + (th.x1 - th.x0) * k;
-      const y = th.y0 + (th.y1 - th.y0) * k;
-      const lift = Math.sin(k * Math.PI) * 26;
-      const s = bigParcel(!!th.gold);
-      g.fillStyle = 'rgba(10,14,22,0.25)';
-      g.beginPath();
-      g.ellipse(x + 4, y + 6, 10, 5, 0, 0, Math.PI * 2);
-      g.fill();
-      const sc = 0.8 + Math.sin(k * Math.PI) * 0.45;
-      g.save();
-      g.translate(x, y - lift);
-      g.rotate(k * 4);
-      g.drawImage(s.c, -12 * sc, -12 * sc, 24 * sc, 24 * sc);
-      g.restore();
-    }
-    for (const tx of fx.texts) {
-      const k = tx.t / tx.dur;
-      const y = tx.y - 30 - k * 50;
-      g.save();
-      g.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : 1;
-      const pop = k < 0.15 ? 0.6 + (k / 0.15) * 0.5 : 1.1 - Math.min(0.1, (k - 0.15) * 0.3);
-      g.translate(tx.x, y);
-      g.scale(pop, pop);
-      g.font = font(900, tx.size);
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.lineJoin = 'round';
-      g.lineWidth = 7;
-      g.strokeStyle = PALETTE.ink;
-      g.strokeText(tx.text, 0, 0);
-      g.fillStyle = tx.color;
-      g.fillText(tx.text, 0, 0);
-      g.restore();
-    }
   };
 
   return fx;

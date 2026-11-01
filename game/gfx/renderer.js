@@ -16,11 +16,11 @@ import { Builder, SURF, shade } from './build.js';
 const PITCH = (59 * Math.PI) / 180;
 const FOV = 30;
 
-export function createRenderer(hud) {
+export function createRenderer(hud, opts = {}) {
   const gl = document.createElement('canvas');
   gl.id = 'gl';
   hud.parentNode.insertBefore(gl, hud);
-  const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: true, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: false });
+  const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: true, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: !!opts.preserve });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;

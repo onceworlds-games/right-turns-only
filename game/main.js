@@ -821,6 +821,7 @@ function boot() {
       case 'express': {
         so.express = null;
         so.stats.express++;
+        award('express');
         const tip = pay(e.mat, true);
         throwParcel(van, e.house, true, e.mat, () => {
           audio.play('ding');
@@ -879,6 +880,7 @@ function boot() {
     }
     if (up) {
       so.flowPop = 1;
+      if (so.flow.level >= 5) award('full-flow');
       audio.play('flow', so.flow.level);
       fx.spawn(van.x, van.y, 18, { color: ['#FFC22E', '#F4F1E8', '#5BC4A0'], kind: 1, speed: 160, up: 220, life: 0.9, size: 4, z: 20 });
     }
@@ -1014,6 +1016,7 @@ function boot() {
     // Pay the shift into the career: tips, bonuses, jobs, the streak, the town's medal, unlocks.
     const settled = settleShift(S.profile, { town: town.id, day: today(), tips: so.tips, stats: so.stats, stars, newBest, firstClear });
     S.profile = settled.profile;
+    if (settled.report.after.rank >= 10) award('senior-courier');
     try {
       if (ow) ow.leaderboards.submit('tips', S.profile.xp);
     } catch {
@@ -1314,10 +1317,6 @@ function boot() {
     view.cam = S.cam;
     view.fx = fx;
     view.paint = (view.paint || []).concat(fx.paint);
-    view.drawWorldFx = (ctx) => {
-      if (view.trail) drawTrail(ctx, view.trail);
-      fx.drawWorld(ctx);
-    };
     view.reduced = fx.reduced;
     R.frame(view);
     g.setTransform(R.pr, 0, 0, R.pr, 0, 0);
@@ -1428,12 +1427,47 @@ function boot() {
       beacons: lit.map((h) => R.matAt(h)).concat(w.shift.express && so.phase === 'drive' ? [{ ...R.matAt(w.shift.express.house), gold: true, scale: 1.3 }] : []),
       depotGlow: depot && so.phase === 'drive',
       ghost: so.ghostPos && so.phase === 'drive' ? so.ghostPos : null,
-      trail: S.mode === 'soloResults' ? w.shift.trail : null,
     };
     weather(view, city, w.t, van);
     if (so.phase === 'paused') view.desaturate = true;
-    view.hud = (g) => soloHud(g, so, depot);
+    view.hud = (g) => {
+      // On the results, the route you drove draws itself over the town.
+      if (S.mode === 'soloResults' && so.result) drawRoute(g, w.shift.trail, Math.min(1, (S.t - so.result.at - 0.3) / 2.2));
+      soloHud(g, so, depot);
+    };
     return view;
+  }
+
+  function drawRoute(g, trail, k) {
+    if (!trail || trail.length < 2 || k <= 0) return;
+    const n = Math.max(2, Math.floor(trail.length * k));
+    const pts = trail.slice(0, n).map((p) => R.toScreen(p[0], p[1], 0.1));
+    g.save();
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.strokeStyle = 'rgba(20,26,34,0.55)';
+    g.lineWidth = 9;
+    g.beginPath();
+    pts.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])));
+    g.stroke();
+    for (let i = 1; i < pts.length; i++) {
+      g.strokeStyle = trail[i][3] ? '#FFC22E' : '#F4F1E8';
+      g.lineWidth = 4.5;
+      g.beginPath();
+      g.moveTo(pts[i - 1][0], pts[i - 1][1]);
+      g.lineTo(pts[i][0], pts[i][1]);
+      g.stroke();
+    }
+    // The van's nose at the head of the line.
+    const [hx, hy] = pts[pts.length - 1];
+    g.fillStyle = '#FFC22E';
+    g.strokeStyle = '#141A22';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.arc(hx, hy, 7, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.restore();
   }
 
   function soloHud(g, so, depot) {
@@ -1489,27 +1523,6 @@ function boot() {
     const top = Math.max(70, topInset() + 60);
     const box = { x0: 40, y0: top, x1: S.w - 40, y1: S.h - 44 - bottomInset(false) };
     edgeArrows(g, list, from, box, avoid.concat(reservedRects()), S.t);
-  }
-
-  function drawTrail(g, trail) {
-    if (!trail || trail.length < 2) return;
-    g.save();
-    g.lineCap = 'round';
-    g.lineJoin = 'round';
-    g.strokeStyle = 'rgba(20,26,34,0.5)';
-    g.lineWidth = 12;
-    g.beginPath();
-    trail.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])));
-    g.stroke();
-    for (let i = 1; i < trail.length; i++) {
-      g.strokeStyle = trail[i][3] ? '#FFC22E' : '#F4F1E8';
-      g.lineWidth = 6;
-      g.beginPath();
-      g.moveTo(trail[i - 1][0], trail[i - 1][1]);
-      g.lineTo(trail[i][0], trail[i][1]);
-      g.stroke();
-    }
-    g.restore();
   }
 
   function seatLook(i, seat, body) {
