@@ -1,0 +1,9 @@
+{
+  "name": "right-turns-only",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "par": "node test/par-times.mjs"
+  }
+}
