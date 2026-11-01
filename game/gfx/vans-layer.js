@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { S } from './style.js';
-import { createVanRig, updateRig, paintRig, disposeRig, kickRig } from './van.js';
+import { createVanRig, updateRig, paintRig, disposeRig, kickRig, setTopper } from './van.js';
 import { symbol } from '../draw2d.js';
 import { font } from '../draw2d.js';
 
@@ -12,6 +12,25 @@ export function createVansLayer(R) {
   R.scene.add(group);
   let rigs = []; // index → rig
   let ghost = null;
+  // Podium plinths: painted blocks on a dark foot, made on demand.
+  const plinthGeo = new THREE.BoxGeometry(1, 1, 1);
+  plinthGeo.translate(0, 0.5, 0);
+  const lipGeo = new THREE.BoxGeometry(1, 1, 1);
+  lipGeo.translate(0, -0.5, 0);
+  const plinths = [];
+  function plinth(i) {
+    if (!plinths[i]) {
+      const g = new THREE.Group();
+      const top = new THREE.Mesh(plinthGeo, new THREE.MeshStandardMaterial({ color: '#FFC22E', roughness: 0.55 }));
+      const lip = new THREE.Mesh(lipGeo, new THREE.MeshStandardMaterial({ color: '#141A22', roughness: 0.8 }));
+      top.castShadow = top.receiveShadow = true;
+      lip.receiveShadow = true;
+      g.add(top, lip);
+      group.add(g);
+      plinths[i] = { g, top, lip };
+    }
+    return plinths[i];
+  }
   const layer = {
     rigs,
     setCity() {
@@ -38,6 +57,7 @@ export function createVansLayer(R) {
           group.add(rig.root);
         }
         paintRig(rig, v.color || '#FFC22E');
+        setTopper(rig, v.topper || 'none');
         rig.root.visible = true;
         updateRig(rig, v, env);
         const fade = v.away ? 0.4 : 1;
@@ -48,6 +68,18 @@ export function createVansLayer(R) {
         if (v.kick) kickRig(rig, v.kick);
       }
       for (let i = vans.length; i < rigs.length; i++) rigs[i].root.visible = false;
+      const ps = view.plinths || [];
+      ps.forEach((p, i) => {
+        const o = plinth(i);
+        o.g.visible = true;
+        o.g.position.set(p.x * S, 0, p.y * S);
+        o.top.scale.set(p.w * S, p.hgt, p.d * S);
+        o.top.material.color.set(p.color);
+        // A dark plinth foot.
+        o.lip.scale.set(p.w * S + 0.16, 0.22, p.d * S + 0.16);
+        o.lip.position.y = 0.22;
+      });
+      for (let i = ps.length; i < plinths.length; i++) plinths[i].g.visible = false;
       // The ghost: a pale see-through box van.
       if (view.ghost) {
         if (!ghost) {

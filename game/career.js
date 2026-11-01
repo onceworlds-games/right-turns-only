@@ -2,7 +2,7 @@
 // the daily streak and one challenge per town. Pure rules and data: no page, no platform. The clock and the stars stay
 // the measure of a shift; tips are how well you drove it.
 
-import { angleDiff } from './config.js';
+import { angleDiff, DRIVE } from './config.js';
 import { createRng, hashString } from './rng.js';
 
 // ------------------------------------------------------------------ flow
@@ -82,7 +82,7 @@ export function createMoves() {
       const out = [];
       const hit = events.some((e) => e.type === 'crash' || e.type === 'car' || e.type === 'soft');
       if (events.some((e) => e.type === 'scrape') || hit) scraped = true;
-      // Turns: a hold of at least 60° that comes out straight onto a road, with no scrape on the way.
+      // Turns: a real turn (a hold the physics counts as one, so the snap finishes it), with no scrape on the way.
       if (van.hold && !wasHold) {
         holdFrom = van.turned;
         scraped = hit;
@@ -90,7 +90,7 @@ export function createMoves() {
       }
       if (!van.hold && wasHold) {
         turned = van.turned - holdFrom;
-        if (turned >= (60 * Math.PI) / 180 && !van.zone && !scraped) {
+        if (turned >= DRIVE.snapHeld && !van.zone && !scraped) {
           // How close to a road's direction the release was: under 5° is perfect.
           const err = Math.min(...[0, 1, 2, 3].map((d) => Math.abs(angleDiff(van.h, (d * Math.PI) / 2))));
           pendingTurn = { err, t: 0 };
@@ -348,3 +348,47 @@ export const CHALLENGES = {
   11: { text: '8 perfect turns, no crash', test: (s) => s.perfect >= 8 && s.crashes === 0 },
   12: { text: 'Every parcel on the mat', test: (s) => s.parcels > 0 && s.mats >= s.parcels },
 };
+
+// ------------------------------------------------------------------ settling a shift
+
+/**
+ * Pay a finished shift into the profile. o: { town (id), day, tips (earned driving), stats: { parcels, mats, crashes,
+ * laps, near, perfect, threeRights, express, maxFlow }, stars, newBest, firstClear, lists (garage lists for unlocks) }.
+ * Returns { profile (a new object), report: { driven, bonus: [[label, tips]], jobBonus, total, before, after, jobs: [{ text,
+ * progress, done, fresh, tips }], medal (text or null), streak, unlocks: [item] } }.
+ */
+export function settleShift(profile, o) {
+  const p = { ...profile, jobs: profile.jobs ? { ...profile.jobs } : null, medals: { ...(profile.medals || {}) } };
+  const beforeProgress = progressOf(profile);
+  const before = rankOf(profile.xp || 0);
+  const stats = { ...o.stats, stars: o.stars || 0, tips: o.tips || 0, shifts: 1, clean: o.stats.crashes === 0 ? 1 : 0 };
+  // The town's challenge.
+  const ch = CHALLENGES[o.town];
+  const medal = ch && !p.medals[o.town] && ch.test(stats) ? ch.text : null;
+  if (medal) p.medals[o.town] = 1;
+  const bonus = shiftBonus({ stars: o.stars, newBest: o.newBest, firstClear: o.firstClear, medal: !!medal });
+  // Today's jobs.
+  const jobs = jobsFor(o.day);
+  if (!p.jobs || p.jobs.day !== o.day) p.jobs = { day: o.day, stats: {}, paid: [] };
+  const was = p.jobs.stats;
+  p.jobs.stats = addStats(was, stats);
+  p.jobs.paid = (p.jobs.paid || []).slice();
+  let jobBonus = 0;
+  const jobList = jobs.map((j) => {
+    const progress = jobProgress(j, p.jobs.stats);
+    const fresh = progress >= 1 && !p.jobs.paid.includes(j.id);
+    if (fresh) {
+      p.jobs.paid.push(j.id);
+      jobBonus += j.tips;
+      p.jobsDone = (p.jobsDone || 0) + 1;
+    }
+    return { text: j.text, progress, done: progress >= 1, fresh, tips: j.tips };
+  });
+  // The streak counts any finished shift.
+  p.streak = streakAfter(profile.streak, o.day);
+  const total = (o.tips || 0) + bonus.reduce((a, b) => a + b[1], 0) + jobBonus;
+  p.xp = (profile.xp || 0) + total;
+  const after = rankOf(p.xp);
+  const unlocks = newlyUnlocked(beforeProgress, progressOf(p), o.lists || [PAINTS, TOPPERS, TRAILS]);
+  return { profile: p, report: { driven: o.tips || 0, bonus, jobBonus, total, before, after, jobs: jobList, medal, streak: p.streak.n, unlocks } };
+}

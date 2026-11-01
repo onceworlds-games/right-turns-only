@@ -24,7 +24,7 @@ export function createAudio() {
   let noiseBuf = null;
   let engine = null;
   let squeal = null;
-  const seq = { groove: null, mellow: false, step: 0, next: 0, bar: 0 };
+  const seq = { groove: null, mellow: false, step: 0, next: 0, bar: 0, flow: 1 };
   let lastTick = 0;
 
   function ensure() {
@@ -147,6 +147,47 @@ export function createAudio() {
       tone(587, 0.35, t + 0.26, { type: 'square', gain: 0.08 });
     },
     countdown: (t) => tone(660, 0.12, t, { type: 'square', gain: 0.07 }),
+    // The career's sounds.
+    express: (t) => {
+      // A phone trilling: two quick rings.
+      for (let r = 0; r < 2; r++) for (let i = 0; i < 6; i++) tone(i % 2 ? 1320 : 1660, 0.05, t + r * 0.42 + i * 0.05, { type: 'square', gain: 0.05 });
+    },
+    perfect: (t) => {
+      tone(1568, 0.18, t, { type: 'triangle', gain: 0.16 });
+      tone(2093, 0.3, t + 0.06, { type: 'triangle', gain: 0.14 });
+    },
+    whoosh: (t) => {
+      const f = noise(0.35, t, { freq: 600, q: 1.2, gain: 0.22, attack: 0.08 });
+      f.frequency.exponentialRampToValueAtTime(3200, t + 0.3);
+    },
+    flow: (t, level = 2) => {
+      const base = 60 + (level - 2) * 2;
+      [0, 4, 7, 12].forEach((n, i) => tone(mtof(base + n), 0.16, t + i * 0.055, { type: 'square', gain: 0.06 }));
+      tone(mtof(base + 24), 0.4, t + 0.22, { type: 'triangle', gain: 0.1 });
+    },
+    flowLost: (t) => [7, 4, 0].forEach((n, i) => tone(mtof(64 + n), 0.14, t + i * 0.07, { type: 'triangle', gain: 0.12, slide: 0.9 })),
+    coin: (t) => {
+      tone(2349, 0.05, t, { type: 'square', gain: 0.04 });
+      tone(3136, 0.08, t + 0.04, { type: 'square', gain: 0.035 });
+    },
+    rankup: (t) => {
+      [0, 4, 7, 12, 16].forEach((n, i) => tone(mtof(67 + n), 0.22, t + i * 0.07, { type: 'sawtooth', gain: 0.06 }));
+      tone(mtof(91), 0.7, t + 0.36, { type: 'triangle', gain: 0.12 });
+    },
+    doorbell: (t) => {
+      tone(659, 0.6, t, { type: 'sine', gain: 0.16 });
+      tone(523, 0.9, t + 0.32, { type: 'sine', gain: 0.16 });
+    },
+    bark: (t) => {
+      for (let i = 0; i < 2; i++) {
+        tone(420, 0.08, t + i * 0.16, { type: 'sawtooth', gain: 0.08, slide: 0.55 });
+        noise(0.07, t + i * 0.16, { freq: 900, q: 2, gain: 0.12 });
+      }
+    },
+    cheer: (t) => {
+      for (let i = 0; i < 3; i++) tone(520 + i * 90, 0.32, t + i * 0.03, { type: 'triangle', gain: 0.05, slide: 1.5, attack: 0.05 });
+      noise(0.5, t, { freq: 1500, q: 0.5, gain: 0.06, attack: 0.1 });
+    },
   };
 
   const audio = {
@@ -217,6 +258,10 @@ export function createAudio() {
       if (ac && mus) mus.gain.setTargetAtTime(g ? (mellow ? 0.18 : 0.3) : 0, ac.currentTime, 0.3);
       if (ac) seq.next = Math.max(seq.next, ac.currentTime + 0.05);
     },
+    /** The flow level (1..5): the music adds layers as it rises. */
+    flow(level) {
+      seq.flow = level;
+    },
     duck(on) {
       if (ac && mus) mus.gain.setTargetAtTime(on ? 0.1 : seq.mellow ? 0.18 : 0.3, ac.currentTime, 0.2);
     },
@@ -258,10 +303,22 @@ export function createAudio() {
       const ch = g.chords[bar % g.chords.length];
       for (const n of ch) tone(mtof(g.root + 12 + n), sd * 1.2, t, { type: 'square', gain: mellow ? 0.025 : 0.04, dest: d });
     }
-    // The hook every other bar.
-    if (!mellow && bar % 2 === 1 && s16 % 3 === 0 && s16 < 16) {
+    // The hook every other bar (every bar from flow x3, doubled an octave up at x5).
+    const fl = mellow ? 1 : seq.flow;
+    if (!mellow && (bar % 2 === 1 || fl >= 3) && s16 % 3 === 0 && s16 < 16) {
       const n = g.hook[(s16 / 3) | 0];
-      if (n !== undefined) tone(mtof(g.root + 12 + n), sd * 2.2, t, { type: g.saw ? 'sawtooth' : 'square', gain: 0.035, dest: d });
+      if (n !== undefined) {
+        tone(mtof(g.root + 12 + n), sd * 2.2, t, { type: g.saw ? 'sawtooth' : 'square', gain: 0.035, dest: d });
+        if (fl >= 5) tone(mtof(g.root + 24 + n), sd * 1.6, t, { type: 'triangle', gain: 0.03, dest: d });
+      }
+    }
+    // Flow x4 and up: sixteenth hats and a clap.
+    if (fl >= 4 && s16 % 2 === 1) noise(0.03, t, { freq: 9000, type: 'highpass', gain: 0.07, dest: d });
+    if (fl >= 4 && (s16 === 4 || s16 === 12)) noise(0.09, t + 0.01, { freq: 1200, q: 2, gain: 0.25, dest: d });
+    // Flow x2 and up: a rising pad.
+    if (fl >= 2 && s16 === 0) {
+      const ch = g.chords[bar % g.chords.length];
+      for (const n of ch) tone(mtof(g.root + 24 + n), sd * 14, t, { type: 'sine', gain: 0.012 * (fl - 1), attack: sd * 4, dest: d });
     }
   }
 

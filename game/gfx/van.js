@@ -429,7 +429,7 @@ export function updateRig(rig, v, env) {
   const driftT = v.hold && speed > 18 ? Math.min(0.3, (speed - 18) * 0.05 + 0.12) : 0;
   rig.drift += (driftT - rig.drift) * Math.min(1, dt * (driftT > rig.drift ? 6 : 4));
   // Place.
-  rig.root.position.set(v.x * S, 0, v.y * S);
+  rig.root.position.set(v.x * S, v.z || 0, v.y * S);
   rig.root.rotation.y = -(v.h + rig.drift * 0.6) + (v.spin || 0);
   const squash = v.squash || 0;
   rig.body.position.y = 0.02 + rig.bounce + Math.sin(env.t * 31) * Math.min(0.012, speed * 0.0006);
@@ -471,3 +471,92 @@ export function disposeRig(rig) {
 
 void tagMats;
 void goldParcelGeo;
+
+// ---------------------------------------------------------------- toppers (the garage's roof extras)
+
+const topperCache = new Map();
+
+/** A topper's geometry, base at y = 0, centred on x = z = 0. */
+function topperGeometry(id) {
+  if (topperCache.has(id)) return topperCache.get(id);
+  const b = new Builder();
+  if (id === 'cone') {
+    b.box(0, 0, 0, 0.62, 0.06, 0.62, '#2A2E36');
+    b.cyl(0, 0.06, 0, 0.26, 0.72, '#F26B1D', 14, { r1: 0.05, top: '#F26B1D' });
+    b.cyl(0, 0.3, 0, 0.18, 0.12, '#F4F1E8', 14, { r1: 0.15, cap: false });
+  } else if (id === 'flag') {
+    b.cyl(0, 0, 0, 0.04, 1.7, '#C9CED6', 6);
+    b.tri([0, 1.68, 0], [-0.9, 1.5, 0], [0, 1.28, 0], '#D9412E');
+    b.tri([0, 1.68, 0], [0, 1.28, 0], [-0.9, 1.5, 0], '#D9412E');
+    b.blob(0, 1.72, 0, 0.07, '#FFC22E', 1, 0, 0.03);
+  } else if (id === 'duck') {
+    b.blob(0, 0.28, 0, 0.36, '#FFD23F', 0.8, 1, 0.03);
+    b.blob(0.22, 0.62, 0, 0.21, '#FFD23F', 1, 1, 0.03);
+    b.box(0.46, 0.58, 0, 0.18, 0.07, 0.16, '#F26B1D');
+    for (const s of [-1, 1]) b.blob(0.36, 0.7, s * 0.12, 0.035, '#141A22', 1, 0, 0.03);
+    b.blob(-0.32, 0.42, 0, 0.12, '#FFD23F', 1, 0, 0.03);
+  } else if (id === 'lightbar') {
+    b.box(0, 0, 0, 0.4, 0.08, 1.7, '#2A2E36');
+    b.box(0, 0.08, -0.45, 0.32, 0.18, 0.8, '#3D7BFF');
+    b.box(0, 0.08, 0.45, 0.32, 0.18, 0.8, '#FF8A1E');
+    b.box(0, 0.08, 0, 0.34, 0.2, 0.12, '#F4F1E8');
+  } else if (id === 'stack') {
+    for (let i = 0; i < 4; i++) {
+      b.push(0, i * 0.42, 0, (i % 2 ? 0.18 : -0.12) + i * 0.05);
+      parcelBox(b, i === 3 ? '#FFD23F' : '#C8925A', i === 3 ? '#D9573B' : '#E9D8B4');
+      b.pop();
+    }
+  } else if (id === 'dish') {
+    b.cyl(0, 0, 0, 0.06, 0.45, '#8E949C', 6);
+    b.push(0, 0.55, 0, 0);
+    const m = new THREE.Matrix4().makeRotationZ(0.7);
+    b.pushMatrix(m);
+    b.cyl(0, -0.05, 0, 0.5, 0.18, '#E8E8EC', 16, { r1: 0.12, cap: false });
+    b.cyl(0, -0.05, 0, 0.12, 0.02, '#C9CED6', 10);
+    b.cyl(0, 0, 0, 0.025, 0.55, '#8E949C', 4);
+    b.pop();
+    b.pop();
+  } else if (id === 'tree') {
+    b.cyl(0, 0, 0, 0.08, 0.3, '#6B4A2E', 6);
+    b.cyl(0, 0.25, 0, 0.5, 0.6, '#2F6E4F', 10, { r1: 0.02 });
+    b.cyl(0, 0.6, 0, 0.38, 0.5, '#3A8A5E', 10, { r1: 0.02 });
+    b.cyl(0, 0.92, 0, 0.26, 0.42, '#46A06C', 10, { r1: 0.02 });
+    b.blob(0, 1.38, 0, 0.09, '#FFD23F', 1, 0, 0.03);
+  } else if (id === 'crown') {
+    const n = 8;
+    for (let i = 0; i < n; i++) {
+      const a0 = (i / n) * Math.PI * 2;
+      const a1 = ((i + 1) / n) * Math.PI * 2;
+      const r = 0.42;
+      const p = (a, y, rr = r) => [Math.cos(a) * rr, y, Math.sin(a) * rr];
+      b.quad(p(a1, 0), p(a0, 0), p(a0, 0.3), p(a1, 0.3), '#E8B931');
+      b.quad(p(a0, 0), p(a1, 0), p(a1, 0.3, r - 0.04), p(a0, 0.3, r - 0.04), '#C9962A');
+      b.tri(p(a0, 0.3), p((a0 + a1) / 2, 0.62), p(a1, 0.3), '#E8B931');
+      b.tri(p(a1, 0.3, r - 0.04), p((a0 + a1) / 2, 0.62, r - 0.04), p(a0, 0.3, r - 0.04), '#C9962A');
+      b.blob(Math.cos((a0 + a1) / 2) * r, 0.64, Math.sin((a0 + a1) / 2) * r, 0.05, i % 2 ? '#D9412E' : '#3D7BFF', 1, 0, 0.03);
+    }
+  }
+  const g = b.count ? b.toGeometry() : null;
+  topperCache.set(id, g);
+  return g;
+}
+
+/** Put a topper on a rig's roof (at the back of the roof rack), or take it off ('none'). */
+export function setTopper(rig, id) {
+  if (rig.topperId === id) return;
+  rig.topperId = id;
+  if (rig.topper) {
+    rig.body.remove(rig.topper);
+    rig.topper = null;
+  }
+  const g = id && id !== 'none' ? topperGeometry(id) : null;
+  if (!g) return;
+  const sh = bodyGeos(rig.kind).sh;
+  const y = sh.rack.length ? sh.rack[0][1] : 2.3;
+  const x0 = sh.rack.length ? Math.min(...sh.rack.map((r) => r[0])) - 0.75 : -1.6;
+  const m = new THREE.Mesh(g, rig.mats.trim);
+  m.position.set(Math.max(x0, -sh.len / 2 + 0.4), y, 0);
+  m.castShadow = true;
+  rig.body.add(m);
+  rig.topper = m;
+}

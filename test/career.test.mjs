@@ -177,3 +177,39 @@ test('town challenges: one for every town, each a fair test of a finished shift'
   const poor = { parcels: 6, mats: 2, crashes: 3, laps: 0, near: 0, maxFlow: 1, threeRights: 0, stars: 1, perfect: 0, express: 0 };
   for (const t of TOWNS) assert.equal(CHALLENGES[t.id].test(poor), false, `town ${t.id} fails a poor shift`);
 });
+
+test('settling a shift pays tips, bonuses and fresh jobs once, ranks up, keeps the streak and awards the medal once', async () => {
+  const { settleShift, jobsFor: jf } = await import('../game/career.js');
+  const day = 20400;
+  const jobs = jf(day);
+  // Stats that finish every job there is.
+  const stats = { parcels: 30, mats: 30, crashes: 0, laps: 5, near: 10, perfect: 20, threeRights: 2, express: 3, maxFlow: 5 };
+  const p0 = { xp: 0, stars: {}, streak: null };
+  const a = settleShift(p0, { town: 1, day, tips: 900, stats, stars: 3, newBest: false, firstClear: true });
+  assert.equal(a.report.medal, 'Every parcel on the mat');
+  assert.equal(a.profile.medals[1], 1);
+  const doneJobs = a.report.jobs.filter((j) => j.done);
+  assert.ok(doneJobs.length >= 1);
+  assert.equal(a.report.jobs.filter((j) => j.fresh).length, doneJobs.length);
+  assert.equal(a.report.jobBonus, doneJobs.reduce((s, j) => s + j.tips, 0));
+  assert.equal(jobs.length, 3);
+  assert.equal(a.report.total, 900 + 75 + 50 + 100 + a.report.jobBonus);
+  assert.equal(a.profile.xp, a.report.total);
+  assert.ok(a.report.after.rank > a.report.before.rank);
+  assert.equal(a.profile.streak.n, 1);
+  assert.equal(a.profile.jobsDone, doneJobs.length);
+  // The same day again: no job paid twice, no second medal, streak unchanged.
+  const b = settleShift(a.profile, { town: 1, day, tips: 100, stats, stars: 3, newBest: false, firstClear: false });
+  assert.ok(b.report.jobs.filter((j) => j.fresh).every((j) => !doneJobs.some((d) => d.text === j.text)));
+  const paidAgain = b.report.jobBonus;
+  assert.equal(b.report.medal, null);
+  assert.equal(b.report.total, 100 + 75 + paidAgain);
+  assert.equal(b.profile.streak.n, 1);
+  // Tomorrow: new jobs, the streak grows.
+  const c = settleShift(b.profile, { town: 2, day: day + 1, tips: 10, stats: { ...stats, crashes: 1 }, stars: 1 });
+  assert.equal(c.profile.streak.n, 2);
+  assert.equal(c.profile.jobs.day, day + 1);
+  // The input profile is never changed.
+  assert.equal(p0.xp, 0);
+  assert.equal(a.profile.medals[2], undefined);
+});

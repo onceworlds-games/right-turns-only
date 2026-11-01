@@ -240,3 +240,122 @@ export function shiftCones(g, cx, y, round, rounds) {
     g.restore();
   }
 }
+
+const FLOW_COLORS = ['#B9BEC6', '#9BE37A', '#5BC4E8', '#FFC22E', '#FF7A3D'];
+
+/**
+ * The flow meter: a road-sign plate, "x3" big, and a bar that fills to the next level. pop (0..1) after a level up.
+ * Returns its rect.
+ */
+export function flowMeter(g, x, y, level, fill, pop, t, size = 1) {
+  const w = 128 * size;
+  const h = 46 * size;
+  const col = FLOW_COLORS[Math.max(0, Math.min(4, level - 1))];
+  g.save();
+  const s = 1 + pop * 0.25;
+  g.translate(x + w / 2, y + h / 2);
+  g.scale(s, s);
+  g.translate(-w / 2, -h / 2);
+  g.fillStyle = 'rgba(10,14,22,0.35)';
+  rr(g, 3, 5, w, h, 10 * size);
+  g.fill();
+  g.fillStyle = INK;
+  rr(g, 0, 0, w, h, 10 * size);
+  g.fill();
+  // x5: the plate glows and shimmers.
+  if (level >= 5) {
+    g.strokeStyle = `rgba(255,122,61,${0.5 + 0.5 * Math.sin(t * 8)})`;
+    g.lineWidth = 3;
+    rr(g, -1.5, -1.5, w + 3, h + 3, 11 * size);
+    g.stroke();
+  }
+  g.font = font(900, 30 * size);
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.fillStyle = col;
+  g.fillText(`x${level}`, 10 * size, h / 2 + 1);
+  g.font = font(800, 13 * size);
+  g.fillStyle = '#F4F1E8';
+  g.fillText('FLOW', 52 * size, 14 * size);
+  // Five pips: the levels, the current one filling.
+  const bx = 52 * size;
+  const bw = w - bx - 10 * size;
+  const pw = (bw - 4 * 3 * size) / 5;
+  for (let i = 0; i < 5; i++) {
+    const px = bx + i * (pw + 3 * size);
+    const py = 24 * size;
+    const ph = 12 * size;
+    g.fillStyle = 'rgba(244,241,232,0.16)';
+    rr(g, px, py, pw, ph, 3 * size);
+    g.fill();
+    const k = i < level - 1 ? 1 : i === level - 1 ? (level >= 5 ? 1 : fill) : 0;
+    if (k > 0) {
+      g.fillStyle = FLOW_COLORS[i];
+      rr(g, px, py, Math.max(2, pw * k), ph, 3 * size);
+      g.fill();
+    }
+  }
+  g.restore();
+  return { x, y, w, h };
+}
+
+/** A coin: a gold disc with a C stamped on it (tips). */
+export function coin(g, x, y, r) {
+  g.save();
+  g.fillStyle = '#B8862A';
+  g.beginPath();
+  g.arc(x, y + r * 0.12, r, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#FFC22E';
+  g.beginPath();
+  g.arc(x, y, r, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#B8862A';
+  g.lineWidth = r * 0.22;
+  g.beginPath();
+  g.arc(x, y, r * 0.5, Math.PI * 0.25, Math.PI * 1.75);
+  g.stroke();
+  g.restore();
+}
+
+/** The tips counter: a coin and the running total. */
+export function tipsCounter(g, x, y, tips, pop = 0, align = 'right') {
+  const text = String(Math.round(tips));
+  g.save();
+  g.font = font(900, 26);
+  const tw = g.measureText(text).width;
+  const w = tw + 46;
+  const h = 34;
+  const x0 = align === 'right' ? x - w : x;
+  g.fillStyle = 'rgba(20,26,34,0.72)';
+  rr(g, x0, y, w, h, 17);
+  g.fill();
+  coin(g, x0 + 18, y + h / 2, 10 + pop * 3);
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.fillStyle = pop > 0 ? '#FFE07A' : '#F4F1E8';
+  g.fillText(text, x0 + 34, y + h / 2 + 1);
+  g.restore();
+  return { x: x0, y, w, h };
+}
+
+/** The express call's countdown: a gold plate with the seconds left. */
+export function expressPlate(g, x, y, left, t) {
+  g.save();
+  const urgent = left < 8;
+  const s = urgent ? 1 + 0.06 * Math.sin(t * 14) : 1;
+  g.translate(x, y);
+  g.scale(s, s);
+  g.fillStyle = INK;
+  rr(g, -62, 0, 124, 34, 8);
+  g.fill();
+  g.fillStyle = urgent ? '#FF7A3D' : '#FFD23F';
+  rr(g, -59, 3, 118, 28, 6);
+  g.fill();
+  g.font = font(900, 19);
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = INK;
+  g.fillText(`EXPRESS ${Math.max(0, Math.ceil(left))}`, 0, 18);
+  g.restore();
+}

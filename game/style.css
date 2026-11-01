@@ -130,3 +130,79 @@ button:focus-visible { outline: 4px solid var(--yellow); outline-offset: 4px; }
 
 .toast { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--top) + 64px); background: var(--ink); border: 2px solid var(--paint); border-radius: 8px; padding: 8px 16px; font-size: 20px; font-weight: 800; opacity: 0; transition: opacity 0.2s; }
 .toast.on { opacity: 1; }
+
+/* The pay slip on the results */
+.slip { width: min(440px, 100%); background: rgba(20,26,34,0.86); border: 3px solid var(--paint); box-shadow: 0 0 0 3px var(--ink), 0 10px 24px rgba(0,0,0,0.4); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; pointer-events: auto; }
+.slip-head { display: flex; align-items: center; gap: 8px; }
+.slip-head b { font-size: 40px; font-weight: 900; line-height: 1; color: var(--yellow); font-variant-numeric: tabular-nums; }
+.slip-tips { font-size: 20px; font-weight: 800; opacity: 0.85; }
+.coin { width: 30px; height: 30px; border-radius: 50%; background: var(--yellow); box-shadow: inset 0 -3px 0 #B8862A, 0 0 0 2px var(--ink); position: relative; flex: none; }
+.coin::after { content: ''; position: absolute; inset: 8px; border-radius: 50%; border: 3px solid #B8862A; border-right-color: transparent; }
+.chip { display: inline-flex; gap: 6px; align-items: center; background: rgba(244,241,232,0.1); border-radius: 6px; padding: 2px 8px; font-size: 16px; font-weight: 800; }
+.chip b { color: var(--yellow); }
+.chip.streak { margin-left: auto; background: #E2574C; color: var(--paint); }
+.slip-parts { display: flex; flex-wrap: wrap; gap: 6px; }
+.slip-rank { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; }
+.rank-label { display: flex; flex-direction: column; line-height: 1; }
+.rank-label b { font-size: 22px; font-weight: 900; }
+.rank-label span { font-size: 14px; font-weight: 800; opacity: 0.8; }
+.rank-bar { height: 14px; border-radius: 7px; background: rgba(244,241,232,0.15); overflow: hidden; }
+.rank-bar i { display: block; height: 100%; background: linear-gradient(90deg, #5BC4A0, #9BE37A); border-radius: 7px; }
+.slip-rank.up .rank-label b { color: #9BE37A; animation: rankup 0.5s cubic-bezier(.3,1.8,.5,1); }
+@keyframes rankup { from { transform: scale(1.6); } to { transform: scale(1); } }
+.slip-jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.slip-jobs li { display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: center; font-size: 16px; font-weight: 700; }
+.slip-jobs .tick { width: 18px; height: 18px; border-radius: 4px; border: 2px solid rgba(244,241,232,0.5); display: grid; place-items: center; font-size: 14px; color: var(--ink); }
+.slip-jobs li.done .tick { background: #9BE37A; border-color: #9BE37A; }
+.slip-jobs li.done .jt { opacity: 0.7; }
+.slip-jobs .jp { width: 64px; height: 8px; border-radius: 4px; background: rgba(244,241,232,0.15); overflow: hidden; }
+.slip-jobs .jp i { display: block; height: 100%; background: var(--yellow); }
+.slip-jobs b { font-size: 15px; opacity: 0.7; }
+.slip-jobs b.fresh { color: var(--yellow); opacity: 1; }
+.slip-medal, .slip-unlocks { display: flex; gap: 8px; align-items: baseline; font-size: 16px; font-weight: 700; }
+.slip-medal b { background: var(--yellow); color: var(--ink); border-radius: 4px; padding: 0 6px; font-weight: 900; }
+.slip-unlocks b { color: #9BE37A; font-weight: 900; }
+@media (max-height: 640px) { .slip-jobs, .slip-parts { display: none; } .slip { padding: 8px 10px; gap: 6px; } }
+
+/* The courier's card on the yard */
+.career { position: absolute; left: 16px; width: min(300px, calc(100% - 32px)); background: rgba(20,26,34,0.86); border: 3px solid var(--paint); box-shadow: 0 0 0 3px var(--ink); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
+.career-head { display: flex; align-items: center; gap: 10px; }
+.rank-badge { width: 42px; height: 42px; flex: none; border-radius: 50%; background: var(--paint); color: var(--ink); border: 4px solid #5BC4A0; display: grid; place-items: center; font-size: 22px; font-weight: 900; }
+.career-title { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.career-title b { font-size: 19px; font-weight: 900; line-height: 1; }
+.career-title .rank-bar { height: 8px; }
+.streak-chip { min-width: 40px; height: 34px; padding: 0 8px; border-radius: 17px; background: #E2574C; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 20px; font-weight: 900; }
+.streak-chip::before { content: ''; width: 12px; height: 16px; background: #FFC22E; clip-path: polygon(50% 0, 100% 60%, 80% 100%, 20% 100%, 0 60%); }
+.career-sub { font-size: 14px; font-weight: 900; letter-spacing: 0.1em; opacity: 0.7; }
+.career .slip-jobs li { font-size: 15px; }
+.new-dot { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 50%; background: #E2574C; border: 2px solid var(--paint); }
+.route-sign { position: relative; }
+/* On a phone the card goes under the posts, full width. */
+.career { top: var(--ctop, 16px); }
+@media (max-width: 760px) { .career { top: calc(var(--ctop, 16px) + 62px); } .career .career-sub { display: none; } }
+@media (max-width: 760px) and (max-height: 720px) { .career .slip-jobs { display: none; } }
+@media (max-height: 500px) { .career .slip-jobs, .career .career-sub { display: none; } }
+
+/* The garage: under the van on a phone, beside it on a wide screen. */
+.garage-screen { justify-content: flex-end; }
+.panel.garage { max-width: min(760px, 100%); padding: 14px; }
+@media (min-aspect-ratio: 6/5) and (min-width: 820px) {
+  .garage-screen { justify-content: center; align-items: flex-end; padding-right: 28px; }
+  .panel.garage { width: min(470px, 46vw); max-height: calc(100% - 24px); display: flex; flex-direction: column; }
+  .panel.garage .items { max-height: none; flex: 1; min-height: 0; grid-template-columns: repeat(3, 1fr); }
+}
+.garage-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.garage-head .board-title { margin: 0; }
+.garage-rank { font-size: 20px; font-weight: 900; color: var(--yellow); }
+.tabs { display: flex; gap: 6px; margin: 10px 0; }
+.tab { flex: 1; min-height: 44px; border-radius: 8px; background: rgba(244,241,232,0.08); font-size: 20px; font-weight: 900; color: var(--paint); border: 2px solid transparent; }
+.tab.on { background: var(--paint); color: var(--ink); }
+.items { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; max-height: 34vh; overflow: auto; }
+.item { display: grid; grid-template-rows: auto auto auto; justify-items: center; gap: 2px; padding: 8px 6px; border-radius: 10px; background: rgba(244,241,232,0.06); border: 2px solid rgba(244,241,232,0.2); color: var(--paint); min-height: 92px; }
+.item.on { border-color: var(--yellow); background: rgba(255,194,46,0.14); }
+.item.locked { opacity: 0.55; }
+.item .swatch { width: 40px; height: 40px; border-radius: 50%; border: 3px solid var(--paint); box-shadow: 0 0 0 2px var(--ink); display: grid; place-items: center; background: #4A4E57; }
+.item.locked .swatch { background: var(--paint); }
+.item .swatch svg { width: 22px; height: 22px; }
+.item .nm { font-size: 16px; font-weight: 900; text-align: center; line-height: 1.05; }
+.item .cond { font-size: 13px; font-weight: 800; color: var(--yellow); }

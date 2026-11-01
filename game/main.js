@@ -12,19 +12,22 @@ import { createWeatherLayer } from './gfx/weather-layer.js';
 import { createFx } from './fx.js';
 import { createAudio } from './audio.js';
 import { createUI } from './ui.js';
-import { clockSign, manifest, edgeArrows, plates, shiftCones, outlined, fmtTime, fmtClock } from './hud.js';
-import { drawYard, drawPodium } from './yard.js';
+import { clockSign, manifest, edgeArrows, plates, shiftCones, outlined, fmtTime, fmtClock, flowMeter, tipsCounter, expressPlate } from './hud.js';
+import { createForecourt, forecourtCity } from './forecourt.js';
 import { cityFor, createSoloWorld, createScrambleWorld, parFor, estimateFor, dailyShift } from './world.js';
 import { starsFor, minPlausible, DAILY_PARCELS } from './shift.js';
 import { createRecorder, decodeGhost, ghostAt } from './ghost.js';
 import { createDriver, graphFor, houseTarget, depotTarget } from './driver.js';
 import { dayNumber } from './rng.js';
-import { connect, shiftTime } from './net.js';
+import { connect, shiftTime, topperOf } from './net.js';
+import { createFlow, createMoves, tipFor, settleShift, rankOf, PAINTS, TOPPERS, TRAILS, progressOf, isUnlocked, unlockText, jobsFor, jobProgress, streakNow } from './career.js';
 import { openList, scrambleTargets } from './scramble.js';
 
 const ow = globalThis.onceworlds || null;
 const params = new URLSearchParams(location.search);
 const BODY_IDS = ['box', 'bread', 'pickup', 'mail', 'tuk', 'icecream', 'gold'];
+const PITCH = (59 * Math.PI) / 180; // the renderer's standard camera tilt
+const court = createForecourt();
 
 if (params.has('poster')) {
   import('./poster.js').then((m) => m.renderPoster(params.get('poster')));
@@ -38,7 +41,6 @@ function boot() {
   const people = createPeopleLayer(R);
   R.layers.push(createMarksLayer(R), createTrafficLayer(R), people, createVansLayer(R), createFxLayer(R), createWeatherLayer(R));
   R.greet = people.greet;
-  if (import.meta.env.DEV) globalThis.__rto = { R, people };
   const fx = createFx();
   const audio = createAudio();
   const production = ow ? ow.mode === 'production' : !import.meta.env.DEV;
@@ -65,7 +67,8 @@ function boot() {
     scr: { lastSecond: -1, follow: null, lastCallAt: -1 },
     fontsReady: false,
     autoDriver: autoplay ? createDriver({ skill: 1, seed: 5 }) : null,
-  };
+  };  if (import.meta.env.DEV) globalThis.__rto = { R, people, S, fx };
+
 
   const totalStars = () => totalStarsOf(S.profile);
   let lastPublish = 0;
@@ -86,7 +89,13 @@ function boot() {
     },
     route: () => (audio.play('click'), toRoute()),
     daily: () => (audio.play('click'), toDaily()),
-    body: () => cycleBody(),
+    garage: () => (audio.play('click'), toGarage()),
+    garageTab: (tab) => {
+      audio.play('click');
+      S.garageTab = tab;
+      renderGarage();
+    },
+    pick: (tab, id) => pickGarage(tab, id),
     invite: () => {
       try {
         ow.ui.showInvite();
@@ -177,7 +186,7 @@ function boot() {
     }).then((net) => {
       if (!net) return;
       S.net = net;
-      net.myBody = S.profile.body;
+      syncLook();
       const room = net.room;
       room.on('close', (reason) => closed(reason));
       if (net.match) {
@@ -193,9 +202,13 @@ function boot() {
   async function loadProfile() {
     try {
       const p = await ow.save.get('profile');
-      if (p && typeof p === 'object') S.profile = { ...defaultProfile(), ...p, hints: { ...(p.hints || {}) }, best: { ...(p.best || {}) }, stars: { ...(p.stars || {}) } };
+      if (p && typeof p === 'object') {
+        const d = defaultProfile();
+        S.profile = { ...d, ...p, hints: { ...(p.hints || {}) }, best: { ...(p.best || {}) }, stars: { ...(p.stars || {}) }, medals: { ...(p.medals || {}) }, garage: { ...d.garage, ...(p.garage || {}) } };
+        S.profile.xp = Math.max(0, Number(S.profile.xp) || 0);
+      }
       S.profile.body = clamp(S.profile.body | 0, 0, VAN_BODIES.length - 1);
-      if (S.net) S.net.myBody = S.profile.body;
+      syncLook();
       if (S.mode === 'yard') toYard();
     } catch {
       /* a guest or offline: defaults */
@@ -268,7 +281,7 @@ function boot() {
     }
     // Space or Enter press the screen's main sign when nothing has the focus.
     const focused = document.activeElement && document.activeElement.tagName === 'BUTTON';
-    if ((e.code === 'Space' || e.code === 'Enter') && !focused && S.mode !== 'yard') {
+    if ((e.code === 'Space' || e.code === 'Enter') && !focused && S.mode !== 'yard' && S.mode !== 'garage') {
       const main = document.querySelector('#ui .play, #ui .sign.blue');
       if (main) {
         e.preventDefault();
@@ -332,6 +345,8 @@ function boot() {
 
   function toYard() {
     if (S.solo) S.solo = null;
+    // From another town the camera cuts to the depot; from the title and the garage it glides.
+    if (S.mode !== 'title' && S.mode !== 'garage' && S.mode !== 'yard') S.camSnap = true;
     setMode('yard');
     fx.clear();
     renderYardUI();
@@ -353,11 +368,15 @@ function boot() {
     const d = dailyShift(today());
     let watching = null;
     if (net && net.match && net.match.phase !== 'lobby' && !net.playing()) watching = 'SHIFT IN PROGRESS · WATCH';
+    const rk = rankOf(S.profile.xp || 0);
+    const day = today();
+    const jobStats = S.profile.jobs && S.profile.jobs.day === day ? S.profile.jobs.stats : {};
     ui.yard({
       posts,
       stars: totalStars(),
       dailyTown: d.town.name.toUpperCase(),
-      body: ui.bodyName(S.profile.body),
+      garageNew: unlockedCount() > (S.profile.seen || 0),
+      career: { rank: rk.rank, title: rk.title, k: rk.max ? 1 : rk.into / rk.need, streak: streakNow(S.profile.streak, day), jobs: jobsFor(day).map((j) => ({ text: j.text, progress: jobProgress(j, jobStats), done: jobProgress(j, jobStats) >= 1 })) },
       invite: !!(ow && ow.ui && ow.ui.showInvite),
       top: topInset(),
       bottom: bottomInset(true) + 8,
@@ -383,17 +402,77 @@ function boot() {
     setTimeout(renderYardUI, 60);
   }
 
-  function cycleBody() {
-    const i = (S.profile.body + 1) % VAN_BODIES.length;
-    const next = VAN_BODIES[i];
-    if (next.stars > totalStars()) {
-      ui.toast(`${next.name.toUpperCase()}: ${next.stars} STARS`);
-      S.profile.body = 0;
-    } else S.profile.body = i;
-    if (S.net) S.net.myBody = S.profile.body;
-    audio.play('click');
+  // ------------------------------------------------------------ the garage
+
+  const GARAGE_TABS = ['van', 'paint', 'topper', 'trail'];
+
+  /** The van body you drive (its index), only if it is unlocked. */
+  function myBody() {
+    const b = VAN_BODIES[S.profile.body];
+    return b && isUnlocked(b, progressOf(S.profile)) ? S.profile.body : 0;
+  }
+
+  /** The van you drive: { body, color, topper, trail }, only from what is unlocked. */
+  function myLook() {
+    const pr = progressOf(S.profile);
+    const g = S.profile.garage || {};
+    const pick = (list, id) => {
+      const it = list.find((i) => i.id === id);
+      return it && isUnlocked(it, pr) ? it : list[0];
+    };
+    return { body: BODY_IDS[myBody()] || 'box', color: pick(PAINTS, g.paint).color, topper: pick(TOPPERS, g.topper).id, trail: pick(TRAILS, g.trail).id };
+  }
+
+  /** What other players see of my van. */
+  function syncLook() {
+    if (!S.net) return;
+    S.net.myBody = myBody();
+    S.net.myTopper = myLook().topper;
+  }
+
+  function unlockedCount() {
+    const pr = progressOf(S.profile);
+    return [VAN_BODIES, PAINTS, TOPPERS, TRAILS].reduce((a, list) => a + list.filter((i) => isUnlocked(i, pr)).length, 0);
+  }
+
+  function toGarage() {
+    setMode('garage');
+    S.garageTab = S.garageTab || 'van';
+    S.profile.seen = unlockedCount();
     saveProfile();
-    renderYardUI();
+    renderGarage();
+  }
+
+  function renderGarage() {
+    const pr = progressOf(S.profile);
+    const rk = rankOf(S.profile.xp || 0);
+    const look = myLook();
+    const g = S.profile.garage;
+    const cond = (it) => unlockText(it);
+    const TRAIL_SWATCH = { none: '#4A4E57', sparks: '#FFD27A', confetti: 'conic-gradient(#E2574C 0 25%, #FFC22E 0 50%, #5BC4A0 0 75%, #4FA3E8 0)', bubbles: '#9FD8F2', rainbow: 'linear-gradient(90deg,#E2574C,#FFC22E,#5BC4A0,#4FA3E8,#8C5BD1)', stars: '#FFE07A', flames: 'linear-gradient(#FFD23F,#F26B1D)' };
+    const TOPPER_SWATCH = { none: '#4A4E57', cone: '#F26B1D', flag: '#D9412E', duck: '#FFD23F', lightbar: 'linear-gradient(90deg,#3D7BFF 50%,#FF8A1E 50%)', stack: '#C8925A', dish: '#E8E8EC', tree: '#2F6E4F', crown: '#E8B931' };
+    ui.garage({
+      tab: S.garageTab,
+      rank: rk.rank,
+      title: rk.title,
+      tabs: {
+        van: { label: 'VAN', items: VAN_BODIES.map((b, i) => ({ id: String(i), name: b.name, swatch: look.color, locked: !isUnlocked(b, pr), cond: `${b.stars} STARS`, on: BODY_IDS[i] === look.body })) },
+        paint: { label: 'PAINT', items: PAINTS.map((it) => ({ id: it.id, name: it.name, swatch: it.color, locked: !isUnlocked(it, pr), cond: cond(it), on: it.color === look.color && it.id === (g.paint || 'courier') })) },
+        topper: { label: 'TOPPER', items: TOPPERS.map((it) => ({ id: it.id, name: it.name, swatch: TOPPER_SWATCH[it.id], locked: !isUnlocked(it, pr), cond: cond(it), on: it.id === look.topper })) },
+        trail: { label: 'TRAIL', items: TRAILS.map((it) => ({ id: it.id, name: it.name, swatch: TRAIL_SWATCH[it.id], locked: !isUnlocked(it, pr), cond: cond(it), on: it.id === look.trail })) },
+      },
+    });
+  }
+
+  function pickGarage(tab, id) {
+    audio.play('click');
+    if (tab === 'van') {
+      S.profile.body = clamp(Number(id) | 0, 0, VAN_BODIES.length - 1);
+    } else S.profile.garage = { ...S.profile.garage, [tab]: id };
+    court.hop();
+    saveProfile();
+    syncLook();
+    renderGarage();
   }
 
   function toRoute() {
@@ -471,7 +550,8 @@ function boot() {
   }
 
   function back() {
-    if (S.mode === 'card') toRoute();
+    if (S.mode === 'garage') toYard();
+    else if (S.mode === 'card') toRoute();
     else if (S.mode === 'route' || S.mode === 'daily') toYard();
     else if (S.mode === 'soloResults') toYard();
   }
@@ -512,6 +592,15 @@ function boot() {
       ghostDelta: null,
       first: !S.profile.played && town.id === 1 && daily === undefined,
       hinted: new Set(),
+      // The career: flow, the moves that feed it, tips and the shift's stats.
+      flow: createFlow(),
+      moves: createMoves(),
+      tips: 0,
+      tipShown: 0,
+      lastPay: 0, // clock at the last drop or load (the quick bonus)
+      lastScrape: -9,
+      stats: { parcels: 0, mats: 0, crashes: 0, laps: 0, near: 0, perfect: 0, threeRights: 0, express: 0, maxFlow: 1 },
+      flowPop: 0,
     };
     S.profile.played = true;
     setMode('solo');
@@ -583,6 +672,40 @@ function boot() {
     fx.spray(`hint:${id}`, { lines, ...paintAhead(so.world.van, opts.tiles || 2), width: 106, hold: opts.hold || 3.2 });
   }
 
+  // The garage's flow trails (they show from flow x3) and tyre smoke on fast turns.
+  const RAINBOW = ['#E2574C', '#FF9A3C', '#FFC22E', '#5BC4A0', '#4FA3E8', '#8C5BD1'];
+  const TRAIL_FX = {
+    sparks: { n: 2, o: { color: ['#FFD27A', '#FFFFFF'], speed: 50, up: 90, life: 0.4, size: 3, z: 6 } },
+    confetti: { n: 1.4, o: { color: ['#E2574C', '#FFC22E', '#5BC4A0', '#4FA3E8', '#F4F1E8'], kind: 1, speed: 40, up: 150, life: 0.9, size: 4, z: 10 } },
+    bubbles: { n: 0.8, o: { color: ['#E4F6FF', '#AEE0F5'], kind: 2, speed: 16, up: 26, life: 1.2, size: 4, z: 14 } },
+    rainbow: { n: 2.6, o: { kind: 1, speed: 5, up: 8, gravity: 18, life: 0.75, size: 5, z: 8, jitter: 4 } },
+    stars: { n: 1.2, o: { color: ['#FFE07A', '#FFF6C8'], speed: 30, up: 170, life: 0.7, size: 4, z: 14 } },
+    flames: { n: 2.2, o: { color: ['#FFD23F', '#F26B1D', '#E2412E'], kind: 2, speed: 26, up: 46, life: 0.42, size: 4, z: 6 } },
+  };
+
+  function driveFx(so, van, dt) {
+    const bx = van.x - Math.cos(van.h) * 22;
+    const by = van.y - Math.sin(van.h) * 22;
+    const back = van.h + Math.PI;
+    const tr = TRAIL_FX[myLook().trail];
+    if (tr && so.flow.level >= 3 && van.v > 90) {
+      so.trailAcc = (so.trailAcc || 0) + dt * 60 * tr.n * (so.flow.level >= 5 ? 1.6 : 1);
+      while (so.trailAcc >= 1) {
+        so.trailAcc -= 1;
+        const color = tr.o.color || RAINBOW[Math.floor(S.t * 14) % RAINBOW.length];
+        fx.spawn(bx, by, 1, { ...tr.o, color, dir: back, spread: 0.9 });
+      }
+    }
+    if (van.hold && van.v > 170 && !so.world.city.snow) {
+      so.smokeAcc = (so.smokeAcc || 0) + dt * 22 * Math.min(1, (van.v - 170) / 50);
+      while (so.smokeAcc >= 1) {
+        so.smokeAcc -= 1;
+        const side = Math.random() < 0.5 ? -1 : 1;
+        fx.spawn(bx - Math.sin(van.h) * 9 * side, by + Math.cos(van.h) * 9 * side, 1, { color: so.world.city.town.dust ? '#D9BE92' : '#E9E7E2', kind: 2, speed: 12, up: 12, life: 0.8, size: 5, z: 2, dir: back, spread: 1.6 });
+      }
+    }
+  }
+
   function updSolo(dt) {
     const so = S.solo;
     const w = so.world;
@@ -607,12 +730,17 @@ function boot() {
       const events = w.step(hold);
       so.rec.add(w.shift.clock, w.van.x, w.van.y, w.van.h);
       for (const e of events) soloEvent(e);
+      for (const m of so.moves.step(w.van, w.env.cars, events, DT)) flowMove(m);
+      so.flow.step(DT);
+      w.van.boost = so.flow.boost();
+      audio.flow(so.flow.level);
       if (w.van.hold) so.lastHoldT = so.t;
       // Tyre marks while turning fast.
       if (w.van.hold && w.van.v > 150 && Math.floor(w.t * 30) % 2 === 0) R.mark(w.van.x - Math.cos(w.van.h) * 14, w.van.y - Math.sin(w.van.h) * 14, w.van.h, w.city.snow ? 'snow' : 'tyre');
       else if (w.city.snow && Math.floor(w.t * 30) % 3 === 0) R.mark(w.van.x, w.van.y, w.van.h, 'snow');
     }
     if (steps >= 6) so.acc = 0;
+    if (so.phase === 'drive') driveFx(so, w.van, dt);
     // A stuck player (pressed on a wall with no input for 3 s) gets the hint again.
     if (w.van.v < 40 && so.t - so.lastHoldT > 3 && so.phase === 'drive') {
       so.hinted.delete('stuck');
@@ -643,6 +771,7 @@ function boot() {
         const i = w.shift.houses.indexOf(h);
         if (i >= 0) so.states[i] = e.mat ? 'mat' : 'done';
         so.rec.drop(w.shift.clock);
+        const tip = pay(e.mat, false);
         throwParcel(van, h, false, e.mat, () => {
           if (e.mat) {
             audio.play('ding');
@@ -650,7 +779,8 @@ function boot() {
             fx.add('ring', { x: h.dropX, y: h.dropY, color: '#FFFFFF' });
             S.profile.mats++;
             if (S.profile.mats >= 10) award('doormat');
-          } else fx.add('text', { ...R.matAt(h), text: '+1', color: '#F4F1E8' });
+          }
+          tipText(h, tip);
         });
         if (!e.mat) so.nonMat++;
         S.profile.deliveries++;
@@ -666,6 +796,7 @@ function boot() {
       case 'load':
         audio.play('load');
         so.squash = 1;
+        so.lastPay = w.shift.clock;
         fx.spawn(van.x, van.y, 10, { color: ['#C8925A', '#FFC22E'], kind: 1, speed: 90, life: 0.5 });
         break;
       case 'done':
@@ -673,7 +804,35 @@ function boot() {
         break;
       case 'feat':
         award(e.id);
-        if (e.id === 'roundabout-regular') audio.play('lap');
+        if (e.id === 'roundabout-regular') {
+          audio.play('lap');
+          so.stats.laps++;
+          flowMove({ type: 'lap', x: van.x, y: van.y });
+        } else if (e.id === 'three-rights') {
+          so.stats.threeRights++;
+          flowMove({ type: 'threeRights', x: van.x, y: van.y });
+        }
+        break;
+      case 'expressCall':
+        audio.play('express');
+        so.express = { house: e.house, until: e.until };
+        fx.spray('express', { lines: ['EXPRESS', 'CALL'], ...paintAhead(van, 2), width: 110, hold: 2.2 });
+        break;
+      case 'express': {
+        so.express = null;
+        so.stats.express++;
+        const tip = pay(e.mat, true);
+        throwParcel(van, e.house, true, e.mat, () => {
+          audio.play('ding');
+          fx.add('ring', { x: e.house.dropX, y: e.house.dropY, color: '#FFD23F' });
+          tipText(e.house, tip, true);
+        });
+        flowMove({ type: 'express', x: van.x, y: van.y });
+        break;
+      }
+      case 'expressGone':
+        so.express = null;
+        audio.play('taken');
         break;
       case 'closures':
         fx.spray('cones', { lines: ['ROAD', 'WORKS'], ...paintAhead(van, 2), width: 100, hold: 1.5 });
@@ -683,7 +842,62 @@ function boot() {
     }
   }
 
+  /** Tips for a delivery at the current flow; counted into the shift's tips and stats. */
+  function pay(mat, express) {
+    const so = S.solo;
+    const clock = so.world.shift.clock;
+    const tip = tipFor({ mat, quick: clock - so.lastPay, level: so.flow.level, express });
+    so.lastPay = clock;
+    so.tips += tip;
+    if (!express) {
+      so.stats.parcels++;
+      if (mat) so.stats.mats++;
+      flowMove({ type: mat ? 'mat' : 'drop' });
+    }
+    return tip;
+  }
+
+  function tipText(h, tip, gold = false) {
+    const at = R.matAt(h);
+    fx.add('text', { x: at.x, y: at.y, text: `+${tip}`, color: gold ? '#FFD23F' : '#9BE37A', size: gold ? 40 : 30, dur: 1.3, lift: 1 });
+  }
+
+  /** Good driving fills the flow meter: say what it was, pop on a level up. */
+  function flowMove(m) {
+    const so = S.solo;
+    if (!so || so.phase !== 'drive' || S.mode !== 'solo') return;
+    const up = so.flow.add(m.type);
+    so.stats.maxFlow = Math.max(so.stats.maxFlow, so.flow.level);
+    if (m.type === 'perfect') so.stats.perfect++;
+    if (m.type === 'near') so.stats.near++;
+    const van = so.world.van;
+    const word = { perfect: 'PERFECT', near: 'CLOSE!', lap: 'ROUND!', threeRights: 'THREE RIGHTS' }[m.type];
+    if (word) {
+      fx.add('text', { x: van.x, y: van.y, text: word, color: m.type === 'near' ? '#FF9A5A' : '#F4F1E8', size: m.type === 'perfect' ? 26 : 30, dur: 0.9, small: true });
+      if (m.type === 'perfect') audio.play('perfect');
+      if (m.type === 'near') audio.play('whoosh');
+    }
+    if (up) {
+      so.flowPop = 1;
+      audio.play('flow', so.flow.level);
+      fx.spawn(van.x, van.y, 18, { color: ['#FFC22E', '#F4F1E8', '#5BC4A0'], kind: 1, speed: 160, up: 220, life: 0.9, size: 4, z: 20 });
+    }
+  }
+
+  function flowCrash(hard) {
+    const so = S.solo;
+    if (!so || so.phase !== 'drive' || S.mode !== 'solo') return;
+    if (!hard) {
+      if (so.world.shift.clock - so.lastScrape < 0.6) return;
+      so.lastScrape = so.world.shift.clock;
+    } else so.stats.crashes++;
+    const before = so.flow.level;
+    if (so.flow.crash(hard) && before >= 3) audio.play('flowLost');
+  }
+
   function physicsFx(e, van) {
+    if (e.type === 'crash' || e.type === 'car') flowCrash(true);
+    else if (e.type === 'soft' || e.type === 'scrape') flowCrash(false);
     switch (e.type) {
       case 'crash':
         audio.play('crash');
@@ -752,6 +966,7 @@ function boot() {
     const final = Math.round(e.final * 100) / 100;
     const stars = starsFor(final, so.par);
     let newBest = false;
+    let firstClear = false;
     const ghost = so.rec.encode();
     if (so.daily !== undefined) {
       const d = S.profile.daily && S.profile.daily.day === so.daily ? S.profile.daily : { day: so.daily, best: null };
@@ -772,6 +987,7 @@ function boot() {
       award('daily-driver');
     } else {
       const prev = S.profile.best[town.id];
+      firstClear = !prev;
       if (!prev || final < prev) {
         newBest = !!prev;
         S.profile.best[town.id] = final;
@@ -795,8 +1011,16 @@ function boot() {
     } catch {
       /* best effort */
     }
+    // Pay the shift into the career: tips, bonuses, jobs, the streak, the town's medal, unlocks.
+    const settled = settleShift(S.profile, { town: town.id, day: today(), tips: so.tips, stats: so.stats, stars, newBest, firstClear });
+    S.profile = settled.profile;
+    try {
+      if (ow) ow.leaderboards.submit('tips', S.profile.xp);
+    } catch {
+      /* best effort */
+    }
     saveProfile();
-    so.result = { time: e.time, final, mats: e.mats, stars, newBest, at: S.t };
+    so.result = { time: e.time, final, mats: e.mats, stars, newBest, at: S.t, pay: settled.report };
     setTimeout(() => showSoloResults(), 1100);
   }
 
@@ -808,7 +1032,7 @@ function boot() {
     if (done >= 0) fx.paint.splice(done, 1);
     const r = so.result;
     const nextTown = so.daily === undefined ? TOWNS.find((t) => t.id === so.town.id + 1) : null;
-    const handle = ui.results({ time: r.time, final: r.final, mats: r.mats, parcels: so.world.shift.houses.length, par: so.par, next: !!nextTown && S.profile.unlocked >= nextTown.id, bottom: bottomInset(false) + 18 });
+    const handle = ui.results({ time: r.time, final: r.final, mats: r.mats, parcels: so.world.shift.houses.length, par: so.par, next: !!nextTown && S.profile.unlocked >= nextTown.id, bottom: bottomInset(false) + 18, pay: r.pay });
     for (let i = 0; i < r.stars; i++) {
       setTimeout(() => {
         if (S.mode !== 'soloResults') return;
@@ -816,6 +1040,16 @@ function boot() {
         audio.play('star', i);
       }, 450 + i * 420);
     }
+    setTimeout(
+      () => {
+        if (S.mode !== 'soloResults') return;
+        handle.pay((kind) => {
+          if (kind === 'tick') audio.play('coin');
+          else if (kind === 'rank') audio.play('rankup');
+        });
+      },
+      450 + r.stars * 420 + 150,
+    );
     if (r.newBest) fx.spray('best', { lines: ['NEW', 'BEST'], x: so.world.city.depot.x, y: so.world.city.depot.y - 140, h: -Math.PI / 2, width: 110, hold: Infinity });
   }
 
@@ -856,7 +1090,8 @@ function boot() {
     const phase = m.phase;
     if (phase === 'lobby' || phase === 'countdown') return toYard();
     const w = net.ensureWorld();
-    if (w && R.city !== w.city) {
+    // The podium is back at the depot (see podiumView).
+    if (w && R.city !== w.city && phase !== 'results') {
       R.setCity(w.city);
       R.clearMarks();
     }
@@ -881,7 +1116,12 @@ function boot() {
         if (mine > 0 && Object.values(d.pts).every((v) => v <= mine)) award('rush-hour');
       }
     }
-    if (phase === 'results' && S.lastPhase !== 'results') audio.play('fanfare');
+    if (phase === 'results' && S.lastPhase !== 'results') {
+      audio.play('fanfare');
+      // Cut to the podium at the depot.
+      fx.clear();
+      S.camSnap = true;
+    }
     S.lastPhase = phase;
     if (m.data && phase === 'round') net.lastData = m.data;
     if (phase === 'round' && w) {
@@ -1000,6 +1240,10 @@ function boot() {
     S.cam.x += (target.x - S.cam.x) * k;
     S.cam.y += (target.y - S.cam.y) * k;
     S.cam.zoom += (target.zoom - S.cam.zoom) * k;
+    // Every view eases the camera's tilt and turn back to the standard ones unless it asks for its own.
+    const pitch = target.pitch ?? PITCH;
+    S.cam.pitch = (S.cam.pitch ?? PITCH) + (pitch - (S.cam.pitch ?? PITCH)) * k;
+    S.cam.yaw = (S.cam.yaw || 0) + ((target.yaw || 0) - (S.cam.yaw || 0)) * k;
   }
 
   // ------------------------------------------------------------ layout helpers
@@ -1051,10 +1295,10 @@ function boot() {
 
   function draw(dt) {
     const g = R.ctx;
-    if (S.mode === 'yard') return drawYardScene();
-    if (S.mode === 'scramble' && S.net && S.net.match && S.net.match.phase === 'results') return drawResultsScene();
     let view = null;
-    if (S.mode === 'title' && S.title) view = titleView(dt);
+    if (S.mode === 'yard' || S.mode === 'garage') view = forecourtView(dt);
+    else if (S.mode === 'scramble' && S.net && S.net.match && S.net.match.phase === 'results') view = podiumView(dt);
+    else if (S.mode === 'title' && S.title) view = titleView(dt);
     else if ((S.mode === 'route' || S.mode === 'card' || S.mode === 'daily') && S.preview) view = previewView(dt);
     else if ((S.mode === 'solo' || S.mode === 'soloResults') && S.solo) view = soloView(dt);
     else if (S.mode === 'scramble' && S.net && S.net.world) view = scrambleView(dt);
@@ -1064,6 +1308,9 @@ function boot() {
       g.fillRect(0, 0, R.cv.width, R.cv.height);
       return;
     }
+    if (view.cam) easeCam(view.cam, dt, S.camSnap ? 0.001 : 0.45);
+    else easeCam({ x: S.cam.x, y: S.cam.y, zoom: S.cam.zoom }, dt, 0.45); // only the tilt and turn move: back to the standard ones
+    S.camSnap = false;
     view.cam = S.cam;
     view.fx = fx;
     view.paint = (view.paint || []).concat(fx.paint);
@@ -1074,7 +1321,7 @@ function boot() {
     view.reduced = fx.reduced;
     R.frame(view);
     g.setTransform(R.pr, 0, 0, R.pr, 0, 0);
-    if (view.hud) view.hud(g);
+    if (view.hud) view.hud(g, R);
   }
 
   function weather(view, city, t, focus) {
@@ -1176,9 +1423,9 @@ function boot() {
     const view = {
       t: w.t,
       env: w.env,
-      vans: [vanView(van, { color: '#FFC22E', body: BODY_IDS[S.profile.body] || 'box', parcels: Math.min(3, w.shift.lit.length), squash: so.squash })],
-      rings: lit.map((h) => ({ x: h.dropX, y: h.dropY })),
-      beacons: lit.map((h) => R.matAt(h)),
+      vans: [vanView(van, { ...myLook(), parcels: Math.min(3, w.shift.lit.length), squash: so.squash })],
+      rings: lit.map((h) => ({ x: h.dropX, y: h.dropY })).concat(w.shift.express && so.phase === 'drive' ? [{ x: w.shift.express.house.dropX, y: w.shift.express.house.dropY, gold: true }] : []),
+      beacons: lit.map((h) => R.matAt(h)).concat(w.shift.express && so.phase === 'drive' ? [{ ...R.matAt(w.shift.express.house), gold: true, scale: 1.3 }] : []),
       depotGlow: depot && so.phase === 'drive',
       ghost: so.ghostPos && so.phase === 'drive' ? so.ghostPos : null,
       trail: S.mode === 'soloResults' ? w.shift.trail : null,
@@ -1204,9 +1451,24 @@ function boot() {
       right - left >= so.states.length * 26 + 16
         ? manifest(g, (left + right) / 2, 14, so.states, right - left)
         : manifest(g, 0, menu.y + menu.h + 14, so.states, S.w - (r * 2 + 30) - 16, 16);
+    // Flow and tips, bottom left and under the clock.
+    so.flowPop = Math.max(0, so.flowPop - 1 / 30);
+    so.tipShown += (so.tips - so.tipShown) * 0.15;
+    if (Math.abs(so.tips - so.tipShown) < 0.5) so.tipShown = so.tips;
+    const fs = S.w < 500 ? 0.85 : 1;
+    const flowBox = flowMeter(g, 16, S.h - bottomInset(false) - 16 - 46 * fs, so.flow.level, so.flow.fill(), so.flowPop, S.t, fs);
+    const tipBox = tipsCounter(g, S.w - 16, cy + r + (delta !== null ? 34 : 12), so.tipShown, so.tips - so.tipShown > 0.5 ? 1 : 0);
+    // The express call: its countdown over the house, and an arrow when it's off screen.
+    const ex = w.shift.express;
+    if (ex && R.toScreen) {
+      const at = R.matAt(ex.house);
+      const [ex0, ey0] = R.toScreen(at.x, at.y, 11.5);
+      expressPlate(g, clamp(ex0, 80, S.w - 80), clamp(ey0 - 40, topInset() + 60, S.h - 120), ex.until - w.shift.clock, S.t);
+    }
     // Arrows to what's off screen.
     const targets = depot ? [{ kind: 'depot', x: w.city.depot.x, y: w.city.depot.y }] : w.shift.lit.map((h) => ({ kind: 'house', x: h.dropX, y: h.dropY }));
-    arrowsFor(g, targets, w.van, [box, { x: cx - r, y: cy - r, w: r * 2, h: r * 2 + 30 }]);
+    if (ex) targets.push({ kind: 'gold', x: ex.house.dropX, y: ex.house.dropY });
+    arrowsFor(g, targets, w.van, [box, { x: cx - r, y: cy - r, w: r * 2, h: r * 2 + 30 }, flowBox, tipBox]);
     if (so.phase === 'intro') {
       const n = Math.ceil(1.3 - so.t);
       outlined(g, so.town.name.toUpperCase(), S.w / 2, S.h * 0.34, Math.min(72, S.w / 9), '#F4F1E8');
@@ -1290,7 +1552,7 @@ function boot() {
     m.seats.forEach((seat, i) => {
       const look = seatLook(i, seat, 0);
       if (seat.me && playing) {
-        vans.push(vanView(w.me.van, { ...seatLook(i, seat, S.profile.body), parcels: w.me.p, me: true }));
+        vans.push(vanView(w.me.van, { ...seatLook(i, seat, myBody()), topper: myLook().topper, parcels: w.me.p, me: true }));
         return;
       }
       const o = others.find((v) => v.id === seat.id);
@@ -1444,10 +1706,12 @@ function boot() {
     const room = net && net.room;
     const players = room ? [...room.players.values()].filter((p) => p.connected !== false) : [];
     const meId = room && room.me ? room.me.id : 'me';
-    if (!room) seats.push({ name: 'You', me: true, body: S.profile.body, ready: false, host: true });
+    const mine = myLook().topper;
+    if (!room) seats.push({ name: 'You', me: true, body: myBody(), topper: mine, ready: false, host: true });
     players.slice(0, 6).forEach((p) => {
       const pres = p.presence || {};
-      seats.push({ name: String(p.name || 'Player').slice(0, 24), me: p.id === meId, body: p.id === meId ? S.profile.body : Number.isInteger(pres.body) ? clamp(pres.body, 0, 6) : 0, ready: !!p.ready, host: room.host === p.id });
+      const me = p.id === meId;
+      seats.push({ name: String(p.name || 'Player').slice(0, 24), me, body: me ? myBody() : Number.isInteger(pres.body) ? clamp(pres.body, 0, 6) : 0, topper: me ? mine : topperOf(pres.tp), ready: !!p.ready, host: room.host === p.id });
     });
     let b = 0;
     while (seats.length < 6) {
@@ -1457,19 +1721,38 @@ function boot() {
     return seats.map((s, i) => ({ ...s, color: SEATS[i].color, symbol: SEATS[i].symbol }));
   }
 
-  function drawYardScene() {
-    const g = R.ctx;
-    g.setTransform(R.pr, 0, 0, R.pr, 0, 0);
-    const posts = document.querySelector('.yard-top');
-    const signs = document.querySelector('.yard-bottom');
-    const top = Math.max(topInset(), posts ? posts.getBoundingClientRect().bottom + 10 : 80);
-    const bottom = signs ? S.h - signs.getBoundingClientRect().top + 8 : bottomInset(true) + 80;
-    drawYard(g, S.w, S.h, yardSeats(), { top, bottom }, S.t);
+  /** The space the yard's HTML leaves for the forecourt: { top, bottom } in px. */
+  function yardBand() {
+    const rect = (sel) => {
+      const e = document.querySelector(sel);
+      return e && e.offsetParent !== null ? e.getBoundingClientRect() : null;
+    };
+    if (S.mode === 'garage') {
+      const panel = rect('.panel.garage');
+      // Beside the panel on a wide screen, above it on a phone.
+      if (panel && panel.left > S.w * 0.4) return { top: topInset() + 40, bottom: bottomInset(false) + 30, left: 0, right: S.w - panel.left + 10 };
+      return { top: topInset() + 56, bottom: panel ? S.h - panel.top + 6 : S.h * 0.5 };
+    }
+    const posts = rect('.yard-top');
+    const signs = rect('.yard-bottom');
+    const career = rect('.career');
+    let top = Math.max(topInset() + 50, posts ? posts.bottom + 14 : 80);
+    let bottom = signs ? S.h - signs.top + 10 : bottomInset(true) + 80;
+    // On a phone the career card sits above the signs.
+    if (career && career.top > S.h * 0.45) bottom = Math.max(bottom, S.h - career.top + 8);
+    else if (career && S.w < 900) top = Math.max(top, career.bottom + 8);
+    return { top, bottom };
   }
 
-  function drawResultsScene() {
-    const g = R.ctx;
-    g.setTransform(R.pr, 0, 0, R.pr, 0, 0);
+  function forecourtView(dt) {
+    R.setCity(forecourtCity());
+    const scr = { w: S.w, h: S.h };
+    if (S.mode === 'garage') return court.garage(scr, myLook(), S.t, dt, yardBand());
+    return court.yard(scr, yardSeats(), S.t, yardBand());
+  }
+
+  function podiumView(dt) {
+    R.setCity(forecourtCity());
     const m = S.net.match;
     const res = m.results || m.standings || [];
     const meId = S.net.room.me ? S.net.room.me.id : '';
@@ -1479,14 +1762,20 @@ function boot() {
       const me = s.id === meId;
       // Players keep the van they chose (from their presence); bots a stock one.
       const pl = S.net.room.players.get(s.id);
-      const pb = pl && pl.presence ? pl.presence.body : null;
-      const body = me ? S.profile.body : Number.isInteger(pb) && pb >= 0 && pb < VAN_BODIES.length ? pb : Math.max(0, i) % 4;
-      return { place: s.place, name: s.name, pts: s.points ?? m.scores[s.id] ?? 0, color: look.color, me, body };
+      const pres = (pl && pl.presence) || {};
+      const pb = pres.body;
+      const body = me ? myBody() : Number.isInteger(pb) && pb >= 0 && pb < VAN_BODIES.length ? pb : Math.max(0, i) % 4;
+      return { place: s.place, name: s.name, pts: s.points ?? m.scores[s.id] ?? 0, color: look.color, symbol: look.symbol, me, body, topper: me ? myLook().topper : topperOf(pres.tp) };
     });
-    drawPodium(g, S.w, S.h, rows, S.t, topInset() + 70, bottomInset(false) + 60);
-    outlined(g, 'SHIFT SCRAMBLE', S.w / 2, topInset() + 34, Math.min(56, S.w / 9), '#F4F1E8');
-    const mine = rows.find((r) => r.me);
-    if (mine) outlined(g, `YOU: ${ordinal(mine.place)} · ${mine.pts} PTS`, S.w / 2, S.h - bottomInset(false) - 26, 28, '#FFC22E');
+    const view = court.podium({ w: S.w, h: S.h }, rows, S.t, dt, { top: topInset() + 90, bottom: bottomInset(false) + 70 }, fx);
+    const hud = view.hud;
+    view.hud = (g, R2) => {
+      hud(g, R2);
+      outlined(g, 'SHIFT SCRAMBLE', S.w / 2, topInset() + 40, Math.min(56, S.w / 9), '#F4F1E8');
+      const mine = rows.find((r) => r.me);
+      if (mine) outlined(g, `YOU: ${ordinal(mine.place)} · ${mine.pts} PTS`, S.w / 2, S.h - bottomInset(false) - 30, 28, '#FFC22E');
+    };
+    return view;
   }
 
   // ------------------------------------------------------------ the loop
@@ -1517,7 +1806,7 @@ function boot() {
       // A shift under way pulls a seated player in (a solo run ends when they're admitted to the next shift).
       const live = m.phase === 'round' || m.phase === 'roundEnd' || m.phase === 'results';
       if (live && net.playing()) {
-        if (S.mode === 'title' || S.mode === 'yard' || S.mode === 'route' || S.mode === 'card' || S.mode === 'daily' || S.mode === 'soloResults') toScramble();
+        if (S.mode === 'title' || S.mode === 'yard' || S.mode === 'garage' || S.mode === 'route' || S.mode === 'card' || S.mode === 'daily' || S.mode === 'soloResults') toScramble();
         else if (S.mode === 'solo' && m.phase === 'round') {
           ui.toast('SHIFT SCRAMBLE');
           toScramble();
@@ -1535,6 +1824,7 @@ function boot() {
     switch (S.mode) {
       case 'title':
       case 'yard':
+      case 'garage':
       case 'route':
       case 'card':
       case 'daily':
@@ -1582,7 +1872,27 @@ function boot() {
 }
 
 function defaultProfile() {
-  return { v: 1, stars: {}, best: {}, unlocked: 1, body: 0, mats: 0, deliveries: 0, wins: 0, hints: {}, played: false, daily: null };
+  return {
+    v: 1,
+    stars: {},
+    best: {},
+    unlocked: 1,
+    body: 0,
+    mats: 0,
+    deliveries: 0,
+    wins: 0,
+    hints: {},
+    played: false,
+    daily: null,
+    // The career (see career.js).
+    xp: 0,
+    garage: { paint: 'courier', topper: 'none', trail: 'none' },
+    seen: 0, // how many garage items were unlocked when the garage was last opened
+    medals: {},
+    jobs: null,
+    jobsDone: 0,
+    streak: null,
+  };
 }
 
 function totalStarsOf(p) {

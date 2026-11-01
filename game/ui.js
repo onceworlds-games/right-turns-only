@@ -134,20 +134,96 @@ export function createUI(root, h) {
     });
     const van = el('button', 'sign white route-sign');
     van.type = 'button';
-    van.append(el('div', '', 'YOUR VAN'), el('span', '', d.body));
+    van.append(el('div', '', 'GARAGE'), el('span', '', d.body));
     van.querySelector('span').style.color = '#141A22';
+    if (d.garageNew) van.append(el('i', 'new-dot'));
     van.addEventListener('click', (e) => {
       e.stopPropagation();
-      h.body();
+      h.garage();
     });
     bottom.append(route, daily, van);
     if (d.invite) bottom.append(sign('blue', 'INVITE', h.invite));
     s.append(bottom);
+    // The courier's card: rank, the streak and today's jobs.
+    if (d.career) s.append(careerCard(d.career, d.top));
     if (d.watching) {
       const w = el('div', 'sign blue watching', d.watching);
       w.style.top = `${d.top + 70}px`;
       s.append(w);
     }
+  };
+
+  /** Rank, the streak and today's three jobs, top left of the yard. */
+  function careerCard(c, top) {
+    const card = el('div', 'career');
+    card.style.setProperty('--ctop', `${top}px`);
+    const head = el('div', 'career-head');
+    const badge = el('div', 'rank-badge', String(c.rank));
+    const txt = el('div', 'career-title');
+    txt.append(el('b', '', c.title.toUpperCase()));
+    const bar = el('div', 'rank-bar');
+    const fill = el('i', '');
+    fill.style.width = `${Math.round(c.k * 100)}%`;
+    bar.append(fill);
+    txt.append(bar);
+    head.append(badge, txt);
+    if (c.streak > 0) head.append(el('div', 'streak-chip', `${c.streak}`));
+    card.append(head);
+    const list = el('ul', 'slip-jobs');
+    for (const j of c.jobs) {
+      const li = el('li', j.done ? 'done' : '');
+      const pb = el('span', 'jp');
+      const pf = el('i', '');
+      pf.style.width = `${Math.round(j.progress * 100)}%`;
+      pb.append(pf);
+      li.append(el('span', 'tick', j.done ? '✓' : ''), el('span', 'jt', j.text), j.done ? el('b', '', 'DONE') : pb);
+      list.append(li);
+    }
+    card.append(el('div', 'career-sub', 'TODAY'), list);
+    return card;
+  }
+
+  /**
+   * The garage: tabs for the van, its paint, a roof topper and a flow trail. d: { tab, rank, tabs: { id: { label, items:
+   * [{ id, name, swatch, locked, cond, on }] } } }. Picking calls h.pick(tab, id); tabs h.garageTab(tab); back h.back().
+   */
+  ui.garage = (d) => {
+    const s = screen('garage', 'garage-screen');
+    const p = el('div', 'panel garage');
+    const head = el('div', 'garage-head');
+    head.append(el('div', 'board-title', 'GARAGE'), el('div', 'garage-rank', `RANK ${d.rank} · ${d.title.toUpperCase()}`));
+    p.append(head);
+    const tabs = el('div', 'tabs');
+    for (const [id, t] of Object.entries(d.tabs)) {
+      const b = el('button', `tab${id === d.tab ? ' on' : ''}`, t.label);
+      b.type = 'button';
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        h.garageTab(id);
+      });
+      tabs.append(b);
+    }
+    p.append(tabs);
+    const items = el('div', 'items');
+    for (const it of d.tabs[d.tab].items) {
+      const b = el('button', `item${it.on ? ' on' : ''}${it.locked ? ' locked' : ''}`);
+      b.type = 'button';
+      const sw = el('span', 'swatch');
+      if (it.swatch) sw.style.background = it.swatch;
+      if (it.locked) setSvg(sw, LOCK_SVG);
+      b.append(sw, el('span', 'nm', it.name.toUpperCase()), el('span', 'cond', it.locked ? it.cond : it.on ? 'ON' : ''));
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (it.locked) ui.toast(`${it.name.toUpperCase()}: ${it.cond}`);
+        else h.pick(d.tab, it.id);
+      });
+      items.append(b);
+    }
+    p.append(items);
+    const row = el('div', 'row');
+    row.append(sign('white', 'BACK', h.back, 'Esc'));
+    p.append(row);
+    s.append(p);
   };
 
   ui.route = (d) => {
@@ -235,6 +311,8 @@ export function createUI(root, h) {
     const stars = el('div', 'stars');
     setSvg(stars, STAR_SVG(false) + STAR_SVG(false) + STAR_SVG(false));
     s.append(stars);
+    const slip = d.pay ? paySlip(d.pay) : null;
+    if (slip) s.append(slip.el);
     const row = el('div', 'row');
     row.style.display = 'flex';
     row.style.gap = '12px';
@@ -250,8 +328,120 @@ export function createUI(root, h) {
         const st = stars.children[i];
         if (st) st.classList.add('on');
       },
+      /** Run the pay slip: the tips count up, the rank bar fills. onTick(kind) for sounds. */
+      pay(onTick) {
+        if (slip) slip.run(onTick);
+      },
     };
   };
+
+  /** The pay slip under the stars: tips counting up, where they came from, the rank bar, today's jobs, the medal, unlocks. */
+  function paySlip(r) {
+    const box = el('div', 'slip');
+    const head = el('div', 'slip-head');
+    const coinEl = el('span', 'coin');
+    const total = el('b', '', '+0');
+    head.append(coinEl, total, el('span', 'slip-tips', 'TIPS'));
+    if (r.streak > 1) head.append(el('span', 'chip streak', `${r.streak}-DAY STREAK`));
+    box.append(head);
+    const parts = el('div', 'slip-parts');
+    const add = (label, n) => {
+      const c = el('span', 'chip');
+      c.append(el('span', '', label), el('b', '', `+${n}`));
+      parts.append(c);
+    };
+    add('DRIVING', r.driven);
+    for (const [label, n] of r.bonus) add(label, n);
+    if (r.jobBonus) add('JOBS', r.jobBonus);
+    box.append(parts);
+    // Rank.
+    const rank = el('div', 'slip-rank');
+    const rl = el('div', 'rank-label');
+    const rn = el('b', '', `RANK ${r.before.rank}`);
+    const rt = el('span', '', r.before.title.toUpperCase());
+    rl.append(rn, rt);
+    const bar = el('div', 'rank-bar');
+    const fill = el('i', '');
+    bar.append(fill);
+    const startK = r.before.max ? 1 : r.before.into / r.before.need;
+    fill.style.width = `${startK * 100}%`;
+    rank.append(rl, bar);
+    box.append(rank);
+    // Jobs.
+    const jobs = el('ul', 'slip-jobs');
+    for (const j of r.jobs) {
+      const li = el('li', j.done ? 'done' : '');
+      const tick = el('span', 'tick', j.done ? '✓' : '');
+      const t = el('span', 'jt', j.text);
+      const pb = el('span', 'jp');
+      const pf = el('i', '');
+      pf.style.width = `${Math.round(j.progress * 100)}%`;
+      pb.append(pf);
+      li.append(tick, t, j.done ? el('b', j.fresh ? 'fresh' : '', j.fresh ? `+${j.tips}` : 'DONE') : pb);
+      jobs.append(li);
+    }
+    box.append(jobs);
+    if (r.medal) {
+      const m = el('div', 'slip-medal');
+      m.append(el('b', '', 'MEDAL'), el('span', '', r.medal));
+      box.append(m);
+    }
+    if (r.unlocks.length) {
+      const u = el('div', 'slip-unlocks');
+      u.append(el('b', '', 'NEW IN THE GARAGE'), el('span', '', r.unlocks.map((i) => i.name).join(' · ')));
+      box.append(u);
+    }
+    return {
+      el: box,
+      run(onTick) {
+        const t0 = performance.now();
+        const dur = Math.min(1600, 500 + r.total * 1.2);
+        const ranks = [];
+        // The bar's path: from where it was, through any rank-ups, to where it is.
+        let rk = r.before.rank;
+        let from = startK;
+        while (rk < r.after.rank) {
+          ranks.push([from, 1, rk]);
+          from = 0;
+          rk++;
+        }
+        ranks.push([from, r.after.max ? 1 : r.after.into / r.after.need, rk]);
+        let shownRank = r.before.rank;
+        let lastTick = 0;
+        const step = (now) => {
+          if (!box.isConnected) return;
+          const k = Math.min(1, (now - t0) / dur);
+          const e = 1 - (1 - k) ** 3;
+          total.textContent = `+${Math.round(r.total * e)}`;
+          if (now - lastTick > 70 && k < 1) {
+            lastTick = now;
+            if (onTick) onTick('tick');
+          }
+          // Walk the bar segments in equal shares of the time.
+          const seg = Math.min(ranks.length - 1, Math.floor(e * ranks.length));
+          const [a, b, rkNow] = ranks[seg];
+          const local = e * ranks.length - seg;
+          fill.style.width = `${(a + (b - a) * Math.min(1, local)) * 100}%`;
+          if (rkNow !== shownRank) {
+            shownRank = rkNow;
+            rn.textContent = `RANK ${rkNow}`;
+            rank.classList.remove('up');
+            void rank.offsetWidth;
+            rank.classList.add('up');
+            if (onTick) onTick('rank');
+          }
+          if (k < 1) requestAnimationFrame(step);
+          else {
+            rn.textContent = `RANK ${r.after.rank}`;
+            rt.textContent = r.after.title.toUpperCase();
+            if (r.after.rank > r.before.rank) rank.classList.add('up');
+            if (onTick) onTick('done');
+          }
+        };
+        requestAnimationFrame(step);
+      },
+    };
+  }
 
   ui.pause = () => {
     const s = screen('pause');

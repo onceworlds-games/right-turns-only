@@ -10,6 +10,7 @@ import { cityFor } from './world.js';
 import { createDriver, houseTarget, depotTarget, graphFor } from './driver.js';
 import { trapHouses } from './shift.js';
 import { newScramble, fillAddresses, checkClaim, applyDrop, openLastCall, createRunner, stepRunner, openList, scrambleTargets, scrambleClosure, ADDR_ID } from './scramble.js';
+import { TOPPERS } from './career.js';
 
 export const SETTINGS = [
   { id: 'towns', label: 'Towns', options: [{ value: 'mixed', label: 'Mixed' }, { value: 'easy', label: 'Easy' }, { value: 'hard', label: 'Hard' }], default: 'mixed' },
@@ -80,8 +81,13 @@ export function cleanVan(p, city) {
     p: Number.isInteger(p.p) && p.p >= 0 && p.p <= 3 ? p.p : 0,
     body: Number.isInteger(p.body) && p.body >= 0 && p.body < VAN_BODIES.length ? p.body : 0,
     s: num(p.s, 0, 2) ? p.s : 0,
+    tp: topperOf(p.tp),
   };
 }
+
+const TOPPER_IDS = new Set(TOPPERS.map((t) => t.id));
+/** A roof topper from presence: a known id or none. */
+export const topperOf = (tp) => (typeof tp === 'string' && TOPPER_IDS.has(tp) ? tp : 'none');
 
 export function createNet(room, helpers, opts = {}) {
   const t = helpers && helpers.t;
@@ -95,6 +101,7 @@ export function createNet(room, helpers, opts = {}) {
     world: null, // { key, city, traffic, env, me: runner, bots: Map, t, closureK }
     events: [],
     myBody: 0,
+    myTopper: 'none',
     lastData: null, // the last round's data, for the between-shift map
     trails: new Map(), // seat id → [[x, y], ...] this shift
     onDrop: null, // (result, pass) for my own claims
@@ -413,7 +420,7 @@ export function createNet(room, helpers, opts = {}) {
   net.publish = (state) => {
     const w = net.world;
     const m = match;
-    const p = { st: state, body: net.myBody };
+    const p = { st: state, body: net.myBody, tp: net.myTopper };
     if (w && (state === 'play' || state === 'watch')) {
       const v = w.me.van;
       p.r = m.roundId;
