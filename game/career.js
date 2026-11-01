@@ -243,6 +243,17 @@ export const TRAILS = [
   { id: 'flames', name: 'Flames', rank: 25 },
 ];
 
+/** Parcel wraps: what the parcels on your roof (and the ones you throw) are wrapped in. card / tape colours. */
+export const WRAPS = [
+  { id: 'kraft', name: 'Brown Paper', card: '#C8925A', tape: '#E9D8B4', rank: 1 },
+  { id: 'priority', name: 'Priority Blue', card: '#2F6FD6', tape: '#F4F1E8', rank: 4 },
+  { id: 'fragile', name: 'Fragile', card: '#F1ECE0', tape: '#D9412E', rank: 8 },
+  { id: 'gift', name: 'Gift Wrap', card: '#D9412E', tape: '#FFD23F', rank: 13 },
+  { id: 'mint', name: 'Mint Box', card: '#5BC4A0', tape: '#F4F1E8', jobs: 40 },
+  { id: 'royal', name: 'Royal Purple', card: '#6A3FB5', tape: '#FFC22E', medals: 3 },
+  { id: 'neon', name: 'Neon', card: '#2E3440', tape: '#FF4FD8', rank: 19 },
+];
+
 /** What a profile has earned so far: { rank, stars, streak, medals, jobs }. */
 export function progressOf(p) {
   return {
@@ -389,6 +400,6 @@ export function settleShift(profile, o) {
   const total = (o.tips || 0) + bonus.reduce((a, b) => a + b[1], 0) + jobBonus;
   p.xp = (profile.xp || 0) + total;
   const after = rankOf(p.xp);
-  const unlocks = newlyUnlocked(beforeProgress, progressOf(p), o.lists || [PAINTS, TOPPERS, TRAILS]);
+  const unlocks = newlyUnlocked(beforeProgress, progressOf(p), o.lists || [PAINTS, TOPPERS, TRAILS, WRAPS]);
   return { profile: p, report: { driven: o.tips || 0, bonus, jobBonus, total, before, after, jobs: jobList, medal, streak: p.streak.n, unlocks } };
 }

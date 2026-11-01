@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { S } from './style.js';
-import { createVanRig, updateRig, paintRig, disposeRig, kickRig, setTopper } from './van.js';
+import { createVanRig, updateRig, paintRig, disposeRig, kickRig, setTopper, setWrap } from './van.js';
 import { symbol } from '../draw2d.js';
 import { font } from '../draw2d.js';
 
@@ -58,6 +58,7 @@ export function createVansLayer(R) {
         }
         paintRig(rig, v.color || '#FFC22E');
         setTopper(rig, v.topper || 'none');
+        setWrap(rig, v.wrap || 'kraft');
         rig.root.visible = true;
         updateRig(rig, v, env);
         const fade = v.away ? 0.4 : 1;

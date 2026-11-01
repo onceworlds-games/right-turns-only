@@ -70,18 +70,16 @@ export function createFxLayer(R) {
   group.add(sparks, paper, smoke);
 
   // Flying parcels.
-  const parcelGeo = parcelGeometry(false);
-  const goldGeo = parcelGeometry(true);
   const flying = [];
-  const throwMesh = (gold) => {
-    let m = flying.find((f) => !f.visible && f.userData.gold === gold);
+  const throwMesh = (gold, wrap) => {
+    let m = flying.find((f) => !f.visible);
     if (!m) {
-      m = new THREE.Mesh(gold ? goldGeo : parcelGeo, R.mats.town);
+      m = new THREE.Mesh(parcelGeometry(false), R.mats.town);
       m.castShadow = true;
-      m.userData.gold = gold;
       flying.push(m);
       group.add(m);
     }
+    m.geometry = parcelGeometry(gold, wrap);
     m.visible = true;
     return m;
   };
@@ -271,7 +269,7 @@ export function createFxLayer(R) {
           const y1 = (hs ? hs.y : KERB) + 0.25;
           const d = Math.hypot(x1 - x0, z1 - z0);
           const lift = Math.sin(k * Math.PI) * (1.8 + d * 0.22);
-          const m = throwMesh(!!th.gold);
+          const m = throwMesh(!!th.gold, th.wrap);
           m.position.set(x0 + (x1 - x0) * e, y0 + (y1 - y0) * k + lift, z0 + (z1 - z0) * e);
           const spin = th.spin || (th.spin = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 3));
           m.rotation.set(k * spin * 0.6, Math.atan2(x1 - x0, z1 - z0) + k * spin, k * spin * 0.25);

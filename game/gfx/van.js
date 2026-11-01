@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { S } from './style.js';
 import { Builder, shade } from './build.js';
 import { patch } from './material.js';
+import { WRAPS } from '../career.js';
 
 const WHEEL_R = 0.42;
 
@@ -270,9 +271,30 @@ export function parcelBox(b, card, tape) {
   b.box(0.16, 0.2, 0.252, 0.2, 0.13, 0.004, '#F4F1E8');
 }
 
-export function parcelGeometry(gold = false) {
+const wrapGeos = new Map();
+/** A parcel's geometry: gold (express, last call) or in a wrap from the garage (brown paper by default). */
+export function parcelGeometry(gold = false, wrap = 'kraft') {
   wheelGeos();
-  return gold ? goldParcelGeo : parcelGeo;
+  if (gold) return goldParcelGeo;
+  if (!wrap || wrap === 'kraft') return parcelGeo;
+  let g = wrapGeos.get(wrap);
+  if (!g) {
+    const w = WRAPS.find((x) => x.id === wrap);
+    if (!w) return parcelGeo;
+    const b = new Builder();
+    parcelBox(b, w.card, w.tape);
+    g = b.toGeometry();
+    wrapGeos.set(wrap, g);
+  }
+  return g;
+}
+
+/** Wrap the parcels on a rig's roof. */
+export function setWrap(rig, wrap) {
+  if (rig.wrapId === wrap) return;
+  rig.wrapId = wrap;
+  const geo = parcelGeometry(false, wrap);
+  for (const m of rig.rack) m.geometry = geo;
 }
 
 function bodyGeos(body) {

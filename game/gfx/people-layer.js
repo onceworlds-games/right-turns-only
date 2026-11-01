@@ -29,8 +29,6 @@ export function createPeopleLayer(R) {
   const greets = []; // residents at their doors
   const strollers = [];
   const dogs = new Map(); // house id → dog
-  const parcelGeo = parcelGeometry(false);
-  const goldGeo = parcelGeometry(true);
   loadModels().then(() => {
     ready = true;
   });
@@ -196,7 +194,7 @@ export function createPeopleLayer(R) {
     const look = lookFor(id * 977 + 3);
     const rig = acquire(look.kind, look);
     if (!rig) return;
-    const parcel = new THREE.Mesh(opts.gold ? goldGeo : parcelGeo, R.mats.town);
+    const parcel = new THREE.Mesh(parcelGeometry(!!opts.gold, opts.wrap), R.mats.town);
     parcel.castShadow = true;
     parcel.position.set(hs.mat[0], hs.y + 0.02, hs.mat[1]);
     parcel.rotation.y = hs.ry + (hash(id) - 0.5) * 0.6;

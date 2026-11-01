@@ -142,7 +142,7 @@ export function createForecourt() {
       if (s.ready && was === false) kick = 0.9;
       // An open bay keeps a stock van in a dull coat: a bot takes it if nobody does.
       const color = s.empty ? mix(s.color, '#9EA3AA', 0.6) : s.color;
-      vans.push({ x: p.x, y: p.y, h: PARK_H, v: 0, color, body: BODY_IDS[s.body] || 'box', topper: s.topper || 'none', parcels: s.empty ? 0 : 3, me: s.me, kick, braking: !s.ready });
+      vans.push({ x: p.x, y: p.y, h: PARK_H, v: 0, color, body: BODY_IDS[s.body] || 'box', topper: s.topper || 'none', wrap: s.wrap, parcels: s.empty ? 0 : 3, me: s.me, kick, braking: !s.ready });
       paint.push(nameDecal(`n${i}`, String(i + 1), p.x - 4, p.y + 40, s.ready ? '#6FDB8F' : '#F4F1E8'));
     });
     return {
@@ -177,7 +177,7 @@ export function createForecourt() {
     return {
       t,
       env: EMPTY,
-      vans: [{ x, y, h: Math.PI + 0.6 + st.spin, v: 0, color: look.color, body: look.body, topper: look.topper, parcels: 3, me: true, kick }],
+      vans: [{ x, y, h: Math.PI + 0.6 + st.spin, v: 0, color: look.color, body: look.body, topper: look.topper, wrap: look.wrap, parcels: 3, me: true, kick }],
       rings: [{ x, y, color: '#F4F1E8', alpha: 0.55 }],
       cam,
       ...focusOn(scr, ui),
@@ -210,7 +210,7 @@ export function createForecourt() {
       const r = rows.find((q) => q.place === p);
       if (!r) continue;
       const h = p === 1 ? PARK_H + t * 1.6 : PARK_H + (p === 2 ? 0.3 : -0.3);
-      vans.push({ x, y, z: d.hgt, h, v: p === 1 ? 160 : 0, hold: p === 1, color: r.color, body: BODY_IDS[r.body] || 'box', topper: r.topper || 'none', parcels: 3, me: r.me });
+      vans.push({ x, y, z: d.hgt, h, v: p === 1 ? 160 : 0, hold: p === 1, color: r.color, body: BODY_IDS[r.body] || 'box', topper: r.topper || 'none', wrap: r.wrap, parcels: 3, me: r.me });
       tags.push({ r, x, y, hgt: d.hgt + 3.8 });
     }
     rest.forEach((r, i) => {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FLOW, createFlow, createMoves, tipFor, shiftBonus, rankOf, rankStep, RANK_TITLES, PAINTS, TOPPERS, TRAILS, progressOf, isUnlocked, newlyUnlocked, jobsFor, JOBS, addStats, jobProgress, streakAfter, streakNow, CHALLENGES } from '../game/career.js';
+import { FLOW, createFlow, createMoves, tipFor, shiftBonus, settleShift as settle, rankOf, rankStep, RANK_TITLES, PAINTS, TOPPERS, TRAILS, WRAPS, progressOf, isUnlocked, newlyUnlocked, jobsFor, JOBS, addStats, jobProgress, streakAfter, streakNow, CHALLENGES } from '../game/career.js';
 import { TOWNS } from '../game/towns.js';
 import { VAN_BODIES } from '../game/config.js';
 import { createVan } from '../game/physics.js';
@@ -117,7 +117,7 @@ test('ranks: thirty of them, each a little further than the last', () => {
 });
 
 test('garage: every item has a unique id and a way to unlock it; rank, stars, streak, medals and jobs all count', () => {
-  for (const list of [PAINTS, TOPPERS, TRAILS]) {
+  for (const list of [PAINTS, TOPPERS, TRAILS, WRAPS]) {
     const ids = new Set(list.map((i) => i.id));
     assert.equal(ids.size, list.length);
     assert.ok(isUnlocked(list[0], { rank: 1, stars: 0, streak: 0, medals: 0, jobs: 0 }), 'the first is free');
@@ -212,4 +212,16 @@ test('settling a shift pays tips, bonuses and fresh jobs once, ranks up, keeps t
   // The input profile is never changed.
   assert.equal(p0.xp, 0);
   assert.equal(a.profile.medals[2], undefined);
+});
+
+test('wraps: every wrap has its card and tape colours; a settled shift announces wraps it unlocks', () => {
+  for (const w of WRAPS) assert.ok(/^#[0-9A-F]{6}$/i.test(w.card) && /^#[0-9A-F]{6}$/i.test(w.tape), w.id);
+  const xpFor = (rank) => {
+    let t = 0;
+    for (let r = 1; r < rank; r++) t += rankStep(r);
+    return t;
+  };
+  const p = { xp: xpFor(4) - 10, stars: {}, streak: null };
+  const { report } = settle(p, { town: 1, day: 20400, tips: 200, stats: { parcels: 1, mats: 0, crashes: 1 }, stars: 1 });
+  assert.ok(report.unlocks.some((i) => i.id === 'priority'), report.unlocks.map((i) => i.id).join());
 });
