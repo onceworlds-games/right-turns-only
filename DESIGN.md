@@ -237,17 +237,26 @@ the same every time, so times compare, ghosts make sense and boards are fair.
   short taps (each small enough for the snap to straighten). In a loop zone: hold until facing the way out, then let go. Every
   0.1 s it rolls the physics 0.55 s ahead for its current input and, if that hits something, takes whichever of letting go, a
   tap or a hold hurts least. Stuck for 2.5 s: replan. A van follows vans ahead like cars.
+- **Going by stopped traffic:** the van stays in the cars' lane, so a stopped car ahead holds it. When one is 20-220 px ahead
+  it taps right to the centre line and passes. At a light it does that only if the light will be green its way from 0.3 s
+  before it gets there to 1 s after (otherwise it waits like the cars); never at a zebra or a drawbridge. Measured over every
+  town at four skills plus scramble sims, against never passing: route times −4%, crashes −15%, time crawling −17%. Always
+  passing (red lights too) was slower and crashed twice as often in Midtown. What waiting is left is arriving at a red.
+- **Traffic never locks up:** a car stuck 4 s behind others (not at a light) creeps on, stopping only for what touches its
+  nose; if it jams again it slips through the cars in its way for 1.2 s. Before, a few towns could gridlock for minutes.
 - **Skill 0.3 → 1.0:** "hands" (precision) 0.79 → 1.0, so every bot drives cleanly enough to watch; reaction 0.1 → 0.06 s;
   look-ahead noise; a missed-turn chance (12% → 0; it replans and loops). Choices carry most of the skill: nearest house as
   the crow flies below 0.5 (and the rookie), by route time above, contested addresses discounted from 0.8. Doormat attempts at
   0.7 and up (Rosa always).
 
-**Checked in node tests** (`npm test`, 24 tests):
+**Checked in node tests** (`npm test`, 26 tests):
 - Every town builds; every address is reachable in right turns from the depot; fixed shift houses per town.
 - Handling: a held turn at a junction comes out a clean 90° when let go near the new road; a tap on a straight swerves and
   comes back; a held van rounds every turning bulb; crashes stall, scrapes and soft hedges don't.
 - The best bot finishes every town within twice par with no NaN; a 0.3 bot finishes every town and is slower over the route;
   bots are deterministic for a seed.
+- Traffic: over ten minutes no car in any town stands still for 30 s; stepping the clock in any increments gives the same
+  traffic.
 - Doormat and ring rules at the boundaries, loading, Coneyard's moving cones, stars against par and the daily floor, the pass
   tracker, ghost encoding and junk ghosts.
 - Scramble sims (12 towns × 2 seeds × 6 bots, 120 s): 5-15 deliveries per van on average, no runaway, exactly one last call

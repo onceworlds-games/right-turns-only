@@ -186,6 +186,8 @@ export function createTraffic(city, seed = city.seed) {
       ph: 0,
       wait: 0,
       creep: 0,
+      jams: 0,
+      ghost: 0,
       tx: 0,
       ty: 0,
       d: 0,
@@ -362,16 +364,21 @@ export function createTraffic(city, seed = city.seed) {
       car.py = car.y;
       car.ph = car.h;
       let target = Math.min(car.top, car.path.curve > 0 ? (car.path.curve > 0.02 ? 70 : 100) : car.top);
-      // Stuck too long behind other cars (a jam): creep on for a moment regardless of them.
+      // Stuck too long behind other cars (a jam): creep on for a moment regardless of them. A creep that fails too (cars
+      // nose to nose round a junction) becomes a ghost: it slips through them for a moment, so a jam never lasts.
       if (car.creep > 0) car.creep -= STEP;
+      if (car.ghost > 0) car.ghost -= STEP;
       const held = stopAhead(car, t);
-      if (held || (car.creep <= 0 ? blocked(car, all) : touching(car, all))) target = 0;
+      if (held || (car.ghost > 0 ? false : car.creep <= 0 ? blocked(car, all) : touching(car, all))) target = 0;
       if (car.v < target) car.v = Math.min(target, car.v + 220 * STEP);
       else car.v = Math.max(target, car.v - 700 * STEP);
       car.wait = car.v < 5 && !held ? car.wait + STEP : 0;
+      if (car.v > 40) car.jams = 0;
       if (car.wait > 4 + (car.id % 5) * 0.3) {
         car.wait = 0;
-        car.creep = 1.2;
+        car.jams = (car.jams || 0) + 1;
+        if (car.jams >= 2) car.ghost = 1.2;
+        else car.creep = 1.2;
       }
       car.s += car.v * STEP;
       while (car.s >= car.path.len) {

@@ -7,13 +7,62 @@
 import { T, DX, DY, DIR_HEADING, DRIVE, DELIVERY, clamp, angleDiff, dirOf } from './config.js';
 import { buildGraph, dijkstra, stateOf, bestTo, pathTo, dropTile } from './route.js';
 import { stepVan } from './physics.js';
-import { loopAt } from './city.js';
+import { loopAt, lightState } from './city.js';
 import { createRng } from './rng.js';
 
 const LANE = 20; // bots keep a little left of the road's centre (traffic keeps left)
 const ROLL_DT = 1 / 20;
+const OVERTAKE_LAT = 7; // stop drifting right this far left of the centre line (the taps carry it the rest)
 
 const left = (d) => [DY[d], -DX[d]];
+
+/** How far left of its road's centre the van is (px), on the road it's heading along. */
+function lateral(van) {
+  const d = dirOf(van.h);
+  const L = left(d);
+  const cx = (Math.floor(van.x / T) + 0.5) * T;
+  const cy = (Math.floor(van.y / T) + 0.5) * T;
+  return (van.x - cx) * L[0] + (van.y - cy) * L[1];
+}
+
+/**
+ * A car or van stopped or crawling in the van's lane ahead. A good driver goes by it down the middle of the road, where
+ * neither lane's traffic reaches (the tram's rails aside).
+ */
+function blockedAhead(van, env, city) {
+  if (!env) return false;
+  const c = Math.cos(van.h);
+  const s = Math.sin(van.h);
+  const d = dirOf(van.h);
+  const look = (o) => {
+    if (o.walker || !Number.isFinite(o.h) || (o.v || 0) > 50) return false;
+    const dx = o.x - van.x;
+    const dy = o.y - van.y;
+    const along = dx * c + dy * s;
+    if (along < 20 || along > 220) return false;
+    if (Math.abs(-dx * s + dy * c) >= (o.wid || 28) / 2 + 14 || Math.abs(angleDiff(van.h, o.h)) >= 0.6) return false;
+    // A queue at a signal: a van can't stop, so going by it means reaching the junction at speed. Do it only when the light
+    // will be green our way all the time the van takes to get there and across (the way a good driver times it).
+    const tx = Math.floor(o.x / T);
+    const ty = Math.floor(o.y / T);
+    for (let k = 0; k <= 2; k++) {
+      const ch = city.at(tx + DX[d] * k, ty + DY[d] * k);
+      if (!SIGNALS.has(ch)) continue;
+      const light = (ch === 'L' || ch === 'R') && city.lights.find((l) => l.tx === tx + DX[d] * k && l.ty === ty + DY[d] * k);
+      if (!light || !Number.isFinite(env.t)) return false;
+      const eta = Math.max(0, Math.hypot(light.x - van.x, light.y - van.y) - T / 2) / Math.max(van.v, 150);
+      const axis = d === 0 || d === 2 ? 'v' : 'h';
+      for (const dt of [eta - 0.3, eta + 0.4, eta + 1]) {
+        const ls = lightState(light, env.t + dt);
+        if (ls.axis !== axis || ls.color !== 'green') return false;
+      }
+      return true;
+    }
+    return true;
+  };
+  return (env.cars || []).some(look) || (env.vans || []).some(look);
+}
+const SIGNALS = new Set(['L', 'R', 'z', 'd']);
 
 /**
  * A driving line through the planned states, as points. `lat` is how far left of the road's centre the van is now; the line
@@ -446,6 +495,11 @@ export function createDriver(opts = {}) {
       if (want2 && !van.zone && Math.abs(angleDiff(card, hNext)) < 0.025 && st.t >= st.tapNext) {
         st.tapUntil = st.t + 0.11;
         st.tapNext = st.t + 0.2;
+      }
+      // Stopped traffic ahead in my lane: drift right to the middle of the road with taps and go by it.
+      if (!van.zone && van.v > 15 && lateral(van) > OVERTAKE_LAT && st.t >= st.tapNext && blockedAhead(van, ctx.env, ctx.city)) {
+        st.tapUntil = st.t + 0.1;
+        st.tapNext = st.t + 0.24;
       }
       want2 = false;
       st.straight = true;
