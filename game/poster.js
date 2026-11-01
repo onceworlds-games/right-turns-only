@@ -77,7 +77,12 @@ export async function renderPoster(name) {
     R.frame(view);
     await raf();
   }
-  R.frame(view);
+  // The last frame drawn for real (not held while shaders build).
+  for (let i = 0; i < 600; i++) {
+    R.frame(view);
+    if (R.drawn) break;
+    await raf();
+  }
   if (p.hud) {
     R.ctx.setTransform(1, 0, 0, 1, 0, 0);
     p.hud(R.ctx, R);

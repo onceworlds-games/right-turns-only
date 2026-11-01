@@ -98,9 +98,9 @@ export function createRenderer(hud, opts = {}) {
   // ---------------------------------------------------------------- shader warm-up
   // A shader program is built (compiled and linked) the first time something draws with it, and a frame builds every new one it
   // meets. With a GPU each takes milliseconds. Without one (SwiftShader, llvmpipe) each takes a second or more, so a first frame
-  // with twenty holds the page for half a minute: no input, no word to the platform. So each frame first builds what the scene
-  // will need, one program after another to the end (its link read back) within a few milliseconds, and isn't drawn until all
-  // are built: the page gets its turn between programs.
+  // with twenty holds the page for half a minute: no input, no word to the platform. So the frame doesn't draw while the scene
+  // has programs that aren't built: they're built in tasks of their own, one after another to the end (the link read back)
+  // for a few milliseconds each, and the page gets its turn between them.
   const built = new Set();
   const variant = (o, m) => {
     const g = o.geometry;
@@ -108,9 +108,7 @@ export function createRenderer(hud, opts = {}) {
     return `${m.id}.${m.version}.${o.isInstancedMesh ? (o.instanceColor ? 'I' : 'i') : ''}${o.isSkinnedMesh ? 's' : ''}${o.isPoints ? 'p' : ''}${o.isLine ? 'l' : ''}${o.isSprite ? 'S' : ''}${a.normal ? 'n' : ''}${a.color ? a.color.itemSize : ''}${g && g.morphAttributes.position ? 'm' : ''}`;
   };
   const cold = [];
-  /** Builds what isn't built yet for this state (low: to the screen, else into the post chain). True while some are left. */
-  function warm(low) {
-    const state = low ? 'L' : 'P';
+  function findCold(state) {
     cold.length = 0;
     scene.traverse((o) => {
       if (cold.length >= 64 || !(o.isMesh || o.isPoints || o.isLine || o.isSprite) || !o.material) return;
@@ -120,22 +118,42 @@ export function createRenderer(hud, opts = {}) {
         return;
       }
     });
+  }
+  let warmFor = 'L';
+  let warmQueued = false;
+  /** True while the scene has programs to build for this state (low: to the screen, else into the post chain). */
+  function warm(low) {
+    warmFor = low ? 'L' : 'P';
+    findCold(warmFor);
+    if (!cold.length && (low || !post.cold(built))) return false;
+    if (!warmQueued) {
+      warmQueued = true;
+      setTimeout(warmTask, 0);
+    }
+    return true;
+  }
+  function warmTask() {
+    warmQueued = false;
+    const low = warmFor === 'L';
+    if (!low && !post.targets) return;
+    // The renderer as the frame draws.
+    renderer.shadowMap.enabled = !low;
+    renderer.toneMapping = low ? THREE.NeutralToneMapping : THREE.NoToneMapping;
     const end = performance.now() + 8;
-    if (!low) while (post.warmOne(built)) if (performance.now() > end) return true;
-    if (!cold.length) return false;
+    if (!low) while (post.warmOne(built)) if (performance.now() > end) return;
+    findCold(warmFor);
     renderer.setRenderTarget(low ? null : post.targets.scene);
-    for (let i = 0; i < cold.length; i++) {
-      const o = cold[i];
+    for (const o of cold) {
       for (const m of renderer.compile(o, camera, scene)) {
         const program = renderer.properties.get(m).currentProgram;
         if (program) program.getUniforms(); // waits for the link
       }
       o.traverse((c) => {
-        if (c.material) for (const m of Array.isArray(c.material) ? c.material : [c.material]) built.add(state + variant(c, m));
+        if (c.material) for (const m of Array.isArray(c.material) ? c.material : [c.material]) built.add(warmFor + variant(c, m));
       });
-      if (performance.now() > end) return i < cold.length - 1 || cold.length === 64;
+      if (performance.now() > end) break;
     }
-    return cold.length === 64;
+    renderer.setRenderTarget(null);
   }
 
   // ---------------------------------------------------------------- towns
@@ -619,7 +637,8 @@ export function createRenderer(hud, opts = {}) {
     renderer.toneMappingExposure = low ? st.exposure : 1;
     if (!low) post.resize(Math.round(R.w * R.pr), Math.round(R.h * R.pr), R.quality === 'high' ? 4 : 0);
     // While programs are still being built the frame isn't drawn: the last one stays up.
-    if (!warm(low)) {
+    R.drawn = !warm(low);
+    if (R.drawn) {
       if (low) {
         renderer.setRenderTarget(null);
         renderer.render(scene, camera);

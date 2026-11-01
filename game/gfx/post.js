@@ -185,9 +185,18 @@ export function createPost(renderer) {
    * Build one of the chain's shader programs not built yet (see the renderer's warm-up): true when one was, false when all are.
    * `done` holds what is built.
    */
+  const chain = [
+    [down, false],
+    [bright, false],
+    [blur, false],
+    [final, true],
+  ];
+  const keyOf = (m) => `post${m.id}.${m.version}`;
+  /** Whether any of the chain's programs isn't built yet. */
+  post.cold = (done) => chain.some(([m]) => !done.has(keyOf(m)));
   post.warmOne = (done) => {
-    for (const [m, toScreen] of [[down, false], [bright, false], [blur, false], [final, true]]) {
-      const key = `post${m.id}.${m.version}`;
+    for (const [m, toScreen] of chain) {
+      const key = keyOf(m);
       if (done.has(key)) continue;
       done.add(key);
       quad.material = m;
