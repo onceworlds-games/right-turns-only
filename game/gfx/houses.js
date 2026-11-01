@@ -177,7 +177,23 @@ export function hedgeRun(leaves, x0, z0, x1, z1, color, h = 1.05, w = 0.7) {
   const cz = (z0 + z1) / 2;
   const alongX = Math.abs(x1 - x0) > Math.abs(z1 - z0);
   const len = Math.hypot(x1 - x0, z1 - z0);
-  leaves.box(cx, 0, cz, alongX ? len : w, h, alongX ? w : len, color, { top: shade(color, 0.14), bottomDark: 0.25 });
+  if (w > 1.3) {
+    leaves.box(cx, 0, cz, alongX ? len : w, h, alongX ? w : len, color, { top: shade(color, 0.14), bottomDark: 0.25 });
+    return;
+  }
+  // A clipped garden hedge: a dense body, and a soft, lumpy top of overlapping clumps catching the light.
+  const body = h * 0.7;
+  leaves.box(cx, 0, cz, alongX ? len : w * 0.92, body, alongX ? w * 0.92 : len, shade(color, -0.05), { top: color, bottomDark: 0.35 });
+  const n = Math.max(1, Math.round(len / 0.8));
+  const r = w * 0.62;
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0 : ((i + 0.5) / n - 0.5) * (len - r) / len * (n / (n - 0.5));
+    const x = cx + (alongX ? t * len : 0);
+    const z = cz + (alongX ? 0 : t * len);
+    const seed = x * 7.31 + z * 3.17;
+    const k = Math.sin(seed * 12.9898) * 0.5 + 0.5;
+    leaves.blob(x, body, z, r * (0.92 + k * 0.16), shade(color, k * 0.08 - 0.04), ((h - body) / r) * (0.9 + k * 0.25), 0, 0.2, seed, shade(color, 0.16));
+  }
 }
 
 function mailbox(b, x, z, color) {

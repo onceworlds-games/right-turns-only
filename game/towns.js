@@ -297,7 +297,7 @@ export const TOWNS = [
     drawbridge: true,
     dusk: true,
     music: 'finale',
-    palette: { lawn: '#7E9F62', lawn2: '#6E8E54', asphalt: '#363A42', pave: '#CFC4B0', hedge: '#4D7343', roofs: ['#B65A3E', '#E2B55A', '#4A7FA6', '#C77D8E', '#6B8F62'], water: '#2D6E9C', tint: '#3A1F3A' },
+    palette: { lawn: '#7E9F62', lawn2: '#6E8E54', asphalt: '#363A42', pave: '#CFC4B0', hedge: '#4D7343', roofs: ['#B65A3E', '#E2B55A', '#5A6FB8', '#C77D8E', '#E8D9BC'], water: '#2D6E9C', tint: '#3A1F3A' },
     map: [
       'wwwwwwwwwwwwwwwwwwwwww',
       'whhhhhhwhhhhhhwhhhhhhw',
