@@ -265,6 +265,8 @@ export function createMarksLayer(R) {
         bc.p.visible = !b.gold;
         bc.gp.visible = !!b.gold;
         const pm = b.gold ? bc.gp : bc.p;
+        if (!b.gold) pm.geometry = parcelGeometry(false, b.wrap);
+        pm.scale.setScalar((b.gold ? 3.2 : 2.8) * (b.size || 1));
         pm.position.set(0, hgt + bob, 0);
         pm.rotation.y = time.value * 1.4 + i;
         pm.rotation.z = Math.sin(time.value * 1.9 + i) * 0.15;

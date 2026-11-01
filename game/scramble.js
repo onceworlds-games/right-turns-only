@@ -2,18 +2,19 @@
 // delivery claim, and one van's step (passes and reloads). The host's page and the tests use the same functions.
 // Pure: no page, no platform.
 
-import { DELIVERY, SCRAMBLE, openAddresses } from './config.js';
+import { T, DELIVERY, SCRAMBLE, KNOCK, openAddresses } from './config.js';
 import { dijkstra, stateOf, bestTo, dropTile } from './route.js';
 import { stepVan, inDepot, createVan } from './physics.js';
 import { createPassTracker } from './shift.js';
-import { closureSet } from './city.js';
+import { closureSet, tileDrivable } from './city.js';
 
 export const ADDR_ID = /^a\d{1,6}$/;
+export const LOOSE_ID = /^l\d{1,6}$/;
 export const MAX_LOG = 12;
 
 /** A shift's shared state (what the host keeps in match.data). */
 export function newScramble(townId) {
-  return { town: townId, addrs: [], seq: 0, pts: {}, mats: {}, log: [], lastCall: false };
+  return { town: townId, addrs: [], seq: 0, pts: {}, mats: {}, log: [], lastCall: false, loose: [] };
 }
 
 /** Coneyard's roadworks in a scramble move every 40 s of the shift. */
@@ -139,6 +140,83 @@ export function applyDrop(data, seat, addrId, mat, ms) {
   return entry;
 }
 
+// ------------------------------------------------------------------ knock-offs
+
+/**
+ * How hard `other` drove into `me`: its speed straight at me (px/s, along the line between the two). A knock-off at
+ * KNOCK.speed or more. Only the van that was hit loses a parcel: ram a van from behind or the side and you keep yours; meet
+ * head on and you both lose one.
+ */
+export function hitSpeed(me, other) {
+  const dx = me.x - other.x;
+  const dy = me.y - other.y;
+  const d = Math.hypot(dx, dy);
+  if (!(d > 1e-6) || !Number.isFinite(other.v) || !Number.isFinite(other.h)) return 0;
+  return (other.v * (Math.cos(other.h) * dx + Math.sin(other.h) * dy)) / d;
+}
+
+/**
+ * After a bump with `other`: does this runner lose a parcel? (It has one, it isn't cooling down, the hit was hard, and it
+ * isn't at the depot, where everyone crowds in to load.)
+ */
+export function knockedBy(r, other, city = null) {
+  if (city && dist(r.van.x, r.van.y, city.depot.x, city.depot.y) < KNOCK.depotSafe) return false;
+  return r.p > 0 && !(r.knockT > 0) && hitSpeed(r.van, other) >= KNOCK.speed;
+}
+
+/** A parcel knocked into the road at x, y (match time ms). The oldest goes when there are too many. Returns it. */
+export function addLoose(data, x, y, ms) {
+  if (!Array.isArray(data.loose)) data.loose = [];
+  data.seq++;
+  const l = { id: `l${data.seq}`, x: Math.round(x), y: Math.round(y), at: Math.max(0, Math.round(ms) || 0) };
+  data.loose.push(l);
+  while (data.loose.length > KNOCK.max) data.loose.shift();
+  return l;
+}
+
+/** Drop loose parcels that have lain too long. True when any went. */
+export function expireLoose(data, ms) {
+  if (!Array.isArray(data.loose) || !data.loose.length) return false;
+  const keep = data.loose.filter((l) => ms - l.at < KNOCK.life * 1000);
+  if (keep.length === data.loose.length) return false;
+  data.loose = keep;
+  return true;
+}
+
+/** Can this van grab that loose parcel? who: { playing, x, y }. Null when it can, or why not. */
+export function checkGrab(data, id, who, ms) {
+  if (!who || !who.playing) return 'not-playing';
+  if (typeof id !== 'string' || !LOOSE_ID.test(id)) return 'bad';
+  const l = (data.loose || []).find((x) => x.id === id);
+  if (!l) return 'gone';
+  if (ms - l.at < KNOCK.settle * 1000 - 250) return 'flying';
+  if (!Number.isFinite(who.x) || !Number.isFinite(who.y)) return 'bad';
+  if (dist(who.x, who.y, l.x, l.y) > KNOCK.claimReach) return 'far';
+  return null;
+}
+
+/** Take a loose parcel out of the road. Returns it (null when it had gone). */
+export function applyGrab(data, id) {
+  const i = (data.loose || []).findIndex((l) => l.id === id);
+  if (i < 0) return null;
+  return data.loose.splice(i, 1)[0];
+}
+
+/** Loose parcels a runner drives over (when it has room): their ids. Each is tried once. */
+export function grabsFor(r, loose, ms) {
+  const out = [];
+  if (!loose || !loose.length) return out;
+  r.tried = r.tried || new Set();
+  for (const l of loose) {
+    if (r.p + out.length >= DELIVERY.perLoad) break;
+    if (r.tried.has(l.id) || ms - l.at < KNOCK.settle * 1000) continue;
+    if (dist(r.van.x, r.van.y, l.x, l.y) > KNOCK.reach) continue;
+    r.tried.add(l.id);
+    out.push(l.id);
+  }
+  return out;
+}
+
 /** One van in a scramble: its van, its parcels, its passes. */
 export function createRunner(city, id) {
   const d = city.depot;
@@ -180,8 +258,37 @@ export function openList(city, data) {
   return out;
 }
 
-/** Targets for a bot driver: the open addresses (gold worth more), or the depot when empty. */
+/**
+ * Loose parcels a bot with room on its roof goes for: close by, not yet tried, not one it has driven past (it would only
+ * loop round and miss again).
+ */
+export function looseTargets(city, data, r) {
+  if (r.p >= DELIVERY.perLoad || !data.loose || !data.loose.length) return [];
+  r.passed = r.passed || new Map(); // id → closest it has been
+  const out = [];
+  for (const l of data.loose) {
+    if ((r.tried && r.tried.has(l.id)) || r.passed.get(l.id) === -1) continue;
+    const d = dist(r.van.x, r.van.y, l.x, l.y);
+    const was = r.passed.get(l.id);
+    if (d < 130 && was !== undefined && d > was + 6) {
+      r.passed.set(l.id, -1); // went by without it
+      continue;
+    }
+    if (d < 130) r.passed.set(l.id, Math.min(was ?? d, d));
+    if (d > KNOCK.chase) continue;
+    const tx = Math.floor(l.x / T);
+    const ty = Math.floor(l.y / T);
+    if (!tileDrivable(city, tx, ty)) continue;
+    out.push({ key: l.id, x: l.x, y: l.y, tile: city.idx(tx, ty), value: r.p <= 0 ? 1.5 : 0.8 });
+  }
+  return out;
+}
+
+/** Targets for a bot driver: the open addresses (gold worth more), or the depot when empty; loose parcels close by. */
 export function scrambleTargets(city, data, r, houseTarget, depotTarget) {
-  if (r.p <= 0) return [depotTarget(city)];
-  return openList(city, data).map((o) => houseTarget(city, o.house, o.addr, o.gold ? SCRAMBLE.goldPoints : 1));
+  const loose = looseTargets(city, data, r);
+  if (r.p <= 0) return [depotTarget(city), ...loose];
+  return openList(city, data)
+    .map((o) => houseTarget(city, o.house, o.addr, o.gold ? SCRAMBLE.goldPoints : 1))
+    .concat(loose);
 }

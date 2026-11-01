@@ -1,7 +1,7 @@
 // A solo shift as one steppable world: the town, its traffic, the van and the rules. The page drives it with the player's
 // button; the tests and the expert-time script drive it with a bot. Pure: no page, no platform.
 
-import { DT, SCRAMBLE, STARS } from './config.js';
+import { DT, SCRAMBLE, STARS, KNOCK, DELIVERY } from './config.js';
 import { buildCity, bridgeState, closedTiles } from './city.js';
 import { createRng } from './rng.js';
 import { createVan, stepVan } from './physics.js';
@@ -10,7 +10,7 @@ import { createShift, shiftHouses, routeEstimate, dailyTown, trapHouses, DAILY_P
 import { closureSet } from './city.js';
 import { TOWNS } from './towns.js';
 import { createDriver, houseTarget, depotTarget, graphFor } from './driver.js';
-import { newScramble, fillAddresses, openList, stepRunner, applyDrop, openLastCall, createRunner, scrambleTargets, scrambleClosure } from './scramble.js';
+import { newScramble, fillAddresses, openList, stepRunner, applyDrop, openLastCall, createRunner, scrambleTargets, scrambleClosure, knockedBy, addLoose, expireLoose, grabsFor, applyGrab } from './scramble.js';
 
 const cities = new Map();
 /** One city per town (they never change). */
@@ -158,7 +158,7 @@ export function createScrambleWorld(town, opts = {}) {
     return w.env;
   };
 
-  /** One step; returns events: { type: 'drop', seat, house, mat, gold, x, y } | 'lastCall' | 'end'. */
+  /** One step; returns events: { type: 'drop', seat, house, mat, gold, x, y } | 'knock' | 'grab' | 'lastCall' | 'end'. */
   w.step = () => {
     const events = [];
     if (w.done) return events;
@@ -170,7 +170,8 @@ export function createScrambleWorld(town, opts = {}) {
       env.vans = runners.filter((o) => o !== r).map((o) => ({ id: o.id, x: o.van.x, y: o.van.y, h: o.van.h, v: o.van.v }));
       const ctx = { city, graph, targets: scrambleTargets(city, data, r, houseTarget, depotTarget), env };
       const hold = r.driver.drive(r.van, ctx, DT);
-      for (const p of stepRunner(r, hold, city, env, open)) {
+      const ev = [];
+      for (const p of stepRunner(r, hold, city, env, open, ev)) {
         const entry = applyDrop(data, r.seat, p.addr, p.mat, w.t * 1000);
         if (!entry) {
           r.p++; // taken a moment ago: the parcel comes back
@@ -181,7 +182,26 @@ export function createScrambleWorld(town, opts = {}) {
         events.push({ type: 'drop', seat: r.seat, house: p.house, mat: p.mat, gold: p.gold, x: p.x, y: p.y });
         fillAddresses(city, data, runners.map((o) => o.van), rand, runners.length, avoid());
       }
+      // Knock-offs, as the pages and the host settle them: a hard hit drops a parcel into the road; a van with room picks
+      // up what it drives over.
+      if (r.knockT > 0) r.knockT -= DT;
+      for (const e of ev) {
+        if (e.type !== 'bump') continue;
+        const other = env.vans.find((v) => v.id === e.other);
+        if (!other || !knockedBy(r, other, city)) continue;
+        r.p--;
+        r.knockT = KNOCK.cooldown;
+        const l = addLoose(data, r.van.x, r.van.y, w.t * 1000);
+        events.push({ type: 'knock', seat: r.seat, id: l.id, x: l.x, y: l.y });
+        break;
+      }
+      for (const id of grabsFor(r, data.loose, w.t * 1000)) {
+        if (!applyGrab(data, id)) continue;
+        r.p = Math.min(DELIVERY.perLoad, r.p + 1);
+        events.push({ type: 'grab', seat: r.seat, id });
+      }
     }
+    expireLoose(data, w.t * 1000);
     w.t += DT;
     if (!data.lastCall && w.t >= seconds - SCRAMBLE.lastCall) {
       const a = openLastCall(city, graph, data, runners.map((r) => r.van), rand, avoid());

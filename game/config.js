@@ -95,6 +95,19 @@ export const SCRAMBLE = {
   claimReach: 150, // host's check: the sender was this close to the ring
 };
 
+// Knock-offs: a van driven hard into yours knocks a parcel off your roof into the road, where any van with room grabs it.
+export const KNOCK = {
+  speed: 150, // px/s the other van was doing straight at yours
+  cooldown: 1.5, // seconds before the same van can lose another
+  settle: 0.6, // seconds before a loose parcel can be picked up (it's still flying)
+  reach: 50, // drive this close to pick one up
+  claimReach: 130, // host's check: the grabber was this close
+  life: 30, // seconds a loose parcel lies in the road
+  max: 6, // loose parcels at once (the oldest goes)
+  chase: 520, // bots with room go for a loose parcel this close (as the crow flies)
+  depotSafe: 170, // nobody loses a parcel this close to the depot (everyone crowds in to load)
+};
+
 export const openAddresses = (seats) => (seats <= 2 ? 3 : seats <= 4 ? 4 : 5);
 
 // Par (the expert time) is the right-turn route time of the best orders × `par`; stars are within these multiples of it.

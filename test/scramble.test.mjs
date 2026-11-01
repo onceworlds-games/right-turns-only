@@ -95,3 +95,97 @@ test('the last call picks a house the vans are about equally far from', () => {
   assert.ok(h);
   assert.ok(vans.every((v) => Math.hypot(v.x - h.dropX, v.y - h.dropY) >= 300));
 });
+
+test('knock-offs: only the van driven into loses a parcel; head on, both do; a slow nudge, nobody', async () => {
+  const { hitSpeed, knockedBy } = await import('../game/scramble.js');
+  const { KNOCK } = await import('../game/config.js');
+  const runner = (x, y, h, v, p = 3) => ({ van: { x, y, h, v }, p, knockT: 0 });
+  // B stopped, A drives into its back at 240.
+  const a = runner(0, 0, 0, 240);
+  const b = runner(28, 0, 0, 0);
+  assert.equal(knockedBy(b, a.van), true);
+  assert.equal(knockedBy(a, b.van), false);
+  // Head on at speed: both.
+  const c = runner(0, 0, 0, 220);
+  const d = runner(28, 0, Math.PI, 220);
+  assert.equal(knockedBy(c, d.van), true);
+  assert.equal(knockedBy(d, c.van), true);
+  // T-bone: the van hit side-on loses one, the one that hit it doesn't.
+  const e = runner(0, 0, Math.PI / 2, 230); // driving south into f
+  const f = runner(0, 28, 0, 200); // crossing east
+  assert.equal(knockedBy(f, e.van), true);
+  assert.equal(knockedBy(e, f.van), false);
+  // Gentle, empty, or still cooling down: nothing.
+  assert.equal(knockedBy(runner(28, 0, 0, 0), runner(0, 0, 0, KNOCK.speed - 20).van), false);
+  assert.equal(knockedBy(runner(28, 0, 0, 0, 0), a.van), false);
+  assert.equal(knockedBy({ ...runner(28, 0, 0, 0), knockT: 0.5 }, a.van), false);
+  // At the depot nobody loses one.
+  const city = { depot: { x: 30, y: 0 } };
+  assert.equal(knockedBy(b, a.van, city), false);
+  assert.equal(knockedBy(b, a.van, { depot: { x: 3000, y: 0 } }), true);
+  assert.ok(Math.abs(hitSpeed({ x: 10, y: 0 }, { x: 0, y: 0, h: 0, v: 200 }) - 200) < 1e-9);
+  assert.equal(hitSpeed({ x: 0, y: 0 }, { x: 0, y: 0, h: 0, v: 200 }), 0);
+});
+
+test('loose parcels: ids, the oldest goes past the cap, they lie for a while, and only a van close by with room gets one', async () => {
+  const { addLoose, expireLoose, checkGrab, applyGrab, grabsFor, LOOSE_ID } = await import('../game/scramble.js');
+  const { KNOCK } = await import('../game/config.js');
+  const d = newScramble(1);
+  const first = addLoose(d, 100.4, 200.6, 1000);
+  assert.ok(LOOSE_ID.test(first.id));
+  assert.deepEqual([first.x, first.y], [100, 201]);
+  for (let i = 0; i < KNOCK.max; i++) addLoose(d, 300, 300, 2000 + i);
+  assert.equal(d.loose.length, KNOCK.max);
+  assert.ok(!d.loose.some((l) => l.id === first.id), 'the oldest went');
+  const l = d.loose[0];
+  const near = { playing: true, x: l.x + 20, y: l.y };
+  assert.equal(checkGrab(d, l.id, near, l.at + 100), 'flying');
+  const late = l.at + KNOCK.settle * 1000 + 10;
+  assert.equal(checkGrab(d, l.id, near, late), null);
+  assert.equal(checkGrab(d, l.id, { playing: true, x: l.x + 400, y: l.y }, late), 'far');
+  assert.equal(checkGrab(d, 'l99999', near, late), 'gone');
+  assert.equal(checkGrab(d, 'a3', near, late), 'bad');
+  assert.equal(checkGrab(d, l.id, null, late), 'not-playing');
+  assert.equal(applyGrab(d, l.id).id, l.id);
+  assert.equal(applyGrab(d, l.id), null);
+  // A runner picks up what's under it, once each, and never past three.
+  const one = [{ id: 'l1', x: 300, y: 300, at: 0 }];
+  const r = { van: { x: 310, y: 300 }, p: 1 };
+  assert.deepEqual(grabsFor(r, one, 9000), ['l1']);
+  assert.equal(grabsFor(r, one, 9000).length, 0, 'each is tried once');
+  assert.equal(grabsFor({ van: { x: 300, y: 300 }, p: 2 }, d.loose, 9000).length, 1, 'never past three');
+  assert.equal(grabsFor({ van: { x: 300, y: 300 }, p: 3 }, d.loose, 9000).length, 0, 'a full van leaves them');
+  assert.equal(grabsFor({ van: { x: 300 + KNOCK.reach + 5, y: 300 }, p: 0 }, one, 9000).length, 0, 'out of reach');
+  assert.equal(grabsFor({ van: { x: 300, y: 300 }, p: 0 }, d.loose, 2100).length, 0, 'not while they are still flying');
+  assert.equal(expireLoose(d, 2000 + KNOCK.life * 1000 + 100), true);
+  assert.equal(d.loose.length, 0);
+  assert.equal(expireLoose(d, 1e9), false);
+});
+
+test('knock-offs in a shift: parcels stay 0-3, every grabbed parcel had been knocked loose, and the road is cleared', () => {
+  let knocks = 0;
+  let grabs = 0;
+  for (const town of TOWNS) {
+    const { w } = (() => {
+      const world = createScrambleWorld(town, { seed: 5, seconds: 120, drivers: drivers(5, 0.6) });
+      const loose = new Set();
+      while (!world.done) {
+        for (const e of world.step()) {
+          if (e.type === 'knock') {
+            knocks++;
+            loose.add(e.id);
+          }
+          if (e.type === 'grab') {
+            grabs++;
+            assert.ok(loose.has(e.id), `${town.name}: grabbed ${e.id}, never knocked loose`);
+          }
+        }
+        for (const r of world.runners) assert.ok(r.p >= 0 && r.p <= 3, `${town.name}: ${r.p} parcels`);
+        assert.ok(world.data.loose.length <= 6);
+      }
+      return { w: world };
+    })();
+    for (const l of w.data.loose) assert.ok(w.t * 1000 - l.at < 30_000);
+  }
+  assert.ok(grabs <= knocks);
+});
