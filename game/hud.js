@@ -2,7 +2,7 @@
 // standings are exit-sign plates, the shifts are traffic cones, and arrows at the edge point at what's off screen.
 
 import { PALETTE } from './config.js';
-import { font, symbol } from './render.js';
+import { font, symbol } from './draw2d.js';
 import { rr, curl, bigParcel } from './sprites.js';
 
 const INK = PALETTE.ink;

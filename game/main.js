@@ -2,7 +2,9 @@
 
 import { T, DT, DX, DY, DIR_HEADING, DELIVERY, SCRAMBLE, SEATS, BOTS, VAN_BODIES, PALETTE, STARS, clamp, dirOf, angleDiff } from './config.js';
 import { TOWNS, TITLE_TOWN } from './towns.js';
-import { createRenderer } from './render.js';
+import { createRenderer } from './gfx/renderer.js';
+import { createVansLayer } from './gfx/vans-layer.js';
+import { createMarksLayer } from './gfx/marks-layer.js';
 import { createFx } from './fx.js';
 import { createAudio } from './audio.js';
 import { createUI } from './ui.js';
@@ -29,9 +31,10 @@ if (params.has('poster')) {
 function boot() {
   const cv = document.getElementById('cv');
   const R = createRenderer(cv);
+  R.layers.push(createMarksLayer(R), createVansLayer(R));
   const fx = createFx();
   const audio = createAudio();
-  const production = !ow || ow.mode === 'production';
+  const production = ow ? ow.mode === 'production' : !import.meta.env.DEV;
   const autoplay = !production && params.get('autoplay') === '1';
   // Capture only: a closer camera for footage (outside production).
   const zoomBoost = production ? 1 : clamp(Number(params.get('zoom')) || 1, 0.5, 2.5);

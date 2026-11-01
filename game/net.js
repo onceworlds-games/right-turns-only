@@ -35,8 +35,11 @@ export async function connect(ow, onJoin) {
     /* the page's business */
   }
   let helpers = null;
+  const HELPERS = '/__onceworlds/v1/';
   try {
-    const [m, h, b] = await Promise.all([import('/__onceworlds/v1/match.js'), import('/__onceworlds/v1/host.js'), import('/__onceworlds/v1/bots.js')]);
+    // The platform serves its helpers next to the SDK; they are never bundled.
+    const at = (name) => import(/* @vite-ignore */ `${HELPERS}${name}.js`);
+    const [m, h, b] = await Promise.all([at('match'), at('host'), at('bots')]);
     helpers = { createMatch: m.createMatch, createHost: h.createHost, createBots: b.createBots, t: h.t };
   } catch {
     helpers = null;

@@ -2,7 +2,7 @@
   "slug": "right-turns-only",
   "name": "Right Turns Only",
   "description": "Your delivery van only turns right. Deliver everything anyway.",
-  "dir": "game",
+  "dir": "dist",
   "productionBranch": "main",
   "genre": "Racing",
   "icon": "store/icon.png",

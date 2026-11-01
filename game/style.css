@@ -1,5 +1,5 @@
-@font-face { font-family: 'Barlow Condensed'; font-weight: 900; font-display: swap; src: url('fonts/barlow-condensed-900.woff2') format('woff2'); }
-@font-face { font-family: 'Barlow Condensed'; font-weight: 700 800; font-display: swap; src: url('fonts/barlow-condensed-700.woff2') format('woff2'); }
+@font-face { font-family: 'Barlow Condensed'; font-weight: 900; font-display: swap; src: url('/fonts/barlow-condensed-900.woff2') format('woff2'); }
+@font-face { font-family: 'Barlow Condensed'; font-weight: 700 800; font-display: swap; src: url('/fonts/barlow-condensed-700.woff2') format('woff2'); }
 
 :root {
   --asphalt: #34383F;
@@ -17,7 +17,9 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--asphalt); color: var(--paint); font-family: var(--font); }
 body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
-canvas#cv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+canvas#gl, canvas#cv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+canvas#cv { z-index: 1; }
+#ui { z-index: 2; }
 #ui { position: fixed; inset: 0; pointer-events: none; }
 #ui > * { pointer-events: none; }
 #ui button, #ui .hit { pointer-events: auto; }

@@ -3,6 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\""
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --test \"test/*.test.mjs\"",
+    "bake": "node tools/bake-models.mjs"
+  },
+  "dependencies": {
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "meshoptimizer": "1.3.0",
+    "vite": "8.3.5"
   }
 }

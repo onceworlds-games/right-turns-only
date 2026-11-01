@@ -2,7 +2,7 @@
 
 import { PALETTE, SEATS } from './config.js';
 import { vanSprite, vanShadow, curl, shade } from './sprites.js';
-import { font, symbol } from './render.js';
+import { font, symbol } from './draw2d.js';
 import { outlined } from './hud.js';
 
 const BODY_IDS = ['box', 'bread', 'pickup', 'mail', 'tuk', 'icecream', 'gold'];

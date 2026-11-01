@@ -2,7 +2,7 @@
 
 import { PALETTE } from './config.js';
 import { bigParcel } from './sprites.js';
-import { font } from './render.js';
+import { font } from './draw2d.js';
 
 const MAX = 260;
 
