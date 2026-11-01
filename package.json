@@ -3,7 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\"",
-    "par": "node test/par-times.mjs"
+    "test": "node --test \"test/*.test.mjs\""
   }
 }
