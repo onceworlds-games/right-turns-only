@@ -65,6 +65,7 @@ export function createRenderer(hud) {
     quality: 'high',
     chunks: { clear: () => signAtlas().redraw() },
     layers: [], // { setCity(town), frame(view, ctx) } from the other modules
+    mats,
     focus: null,
     t: 0,
   };
@@ -496,6 +497,13 @@ export function createRenderer(hud) {
     }
   }
 
+  /** Where a house's doormat is, in px (the 3D house's, when it is built; the map's door otherwise). */
+  R.matAt = (house) => {
+    const hs = R.town && R.town.data.houseAt.get(house.id);
+    return hs ? { x: hs.mat[0] / S, y: hs.mat[1] / S } : { x: house.doorX, y: house.doorY };
+  };
+  R.greet = () => {};
+
   /** Open (or shut) a house's door. */
   R.door = (houseId, open) => {
     const dyn = R.town && R.town.dyn;
@@ -517,12 +525,14 @@ export function createRenderer(hud) {
     shared.uTime.value = now / 1000;
     const { tx, tz, dist, viewH } = placeCamera(view.cam);
     const st = R.style;
+    scene.fog.color.set(st.fog);
     scene.fog.near = dist * 0.9 + st.fogNear * 0.35;
     scene.fog.far = dist * 1.1 + st.fogFar;
     placeSun(st, tx, tz, viewH);
     placeLamps(tx, tz);
     dynamics(view, t);
     for (const l of R.layers) if (l.frame) l.frame(view, R);
+    if (scene.background && scene.background.isColor) scene.background.copy(scene.fog.color);
     // The cutaway round the van the camera follows.
     const f = R.focus;
     if (f && R.quality !== 'low') {

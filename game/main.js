@@ -5,6 +5,10 @@ import { TOWNS, TITLE_TOWN } from './towns.js';
 import { createRenderer } from './gfx/renderer.js';
 import { createVansLayer } from './gfx/vans-layer.js';
 import { createMarksLayer } from './gfx/marks-layer.js';
+import { createTrafficLayer } from './gfx/traffic-layer.js';
+import { createPeopleLayer } from './gfx/people-layer.js';
+import { createFxLayer } from './gfx/fx-layer.js';
+import { createWeatherLayer } from './gfx/weather-layer.js';
 import { createFx } from './fx.js';
 import { createAudio } from './audio.js';
 import { createUI } from './ui.js';
@@ -31,7 +35,10 @@ if (params.has('poster')) {
 function boot() {
   const cv = document.getElementById('cv');
   const R = createRenderer(cv);
-  R.layers.push(createMarksLayer(R), createVansLayer(R));
+  const people = createPeopleLayer(R);
+  R.layers.push(createMarksLayer(R), createTrafficLayer(R), people, createVansLayer(R), createFxLayer(R), createWeatherLayer(R));
+  R.greet = people.greet;
+  if (import.meta.env.DEV) globalThis.__rto = { R, people };
   const fx = createFx();
   const audio = createAudio();
   const production = ow ? ow.mode === 'production' : !import.meta.env.DEV;
@@ -639,11 +646,11 @@ function boot() {
         throwParcel(van, h, false, e.mat, () => {
           if (e.mat) {
             audio.play('ding');
-            fx.add('text', { x: h.doorX, y: h.doorY, text: '−2.0', color: '#FFC22E', size: 34 });
+            fx.add('text', { ...R.matAt(h), text: '−2.0', color: '#FFC22E', size: 34 });
             fx.add('ring', { x: h.dropX, y: h.dropY, color: '#FFFFFF' });
             S.profile.mats++;
             if (S.profile.mats >= 10) award('doormat');
-          } else fx.add('text', { x: h.doorX, y: h.doorY, text: '+1', color: '#F4F1E8' });
+          } else fx.add('text', { ...R.matAt(h), text: '+1', color: '#F4F1E8' });
         });
         if (!e.mat) so.nonMat++;
         S.profile.deliveries++;
@@ -720,11 +727,15 @@ function boot() {
       y0: van.y,
       x1: house.doorX,
       y1: house.doorY,
+      house: house.id,
       gold,
-      dur: mat ? 0.36 : 0.42,
+      dur: mat ? 0.5 : 0.58,
       onDone() {
         audio.play('thud');
-        fx.spawn(house.doorX, house.doorY, 8, { color: '#D8C9A8', kind: 2, speed: 50, life: 0.5, size: 4 });
+        const at = R.matAt(house);
+        fx.spawn(at.x, at.y, 8, { color: '#D8C9A8', kind: 2, speed: 40, life: 0.6, size: 5, z: 2 });
+        fx.spawn(at.x, at.y, gold ? 22 : 10, { color: gold ? ['#FFD23F', '#FFFFFF'] : ['#FFC22E', '#F4F1E8'], kind: 1, speed: 70, up: 140, life: 1.0, size: 4, z: 10 });
+        R.greet(house.id, { gold, mat });
         if (onLand) onLand();
       },
     });
@@ -916,7 +927,7 @@ function boot() {
       const p = e.pass;
       throwParcel(w.me.van, p.house, p.gold, p.mat, () => {
         if (p.mat) audio.play('ding');
-        fx.add('text', { x: p.house.doorX, y: p.house.doorY, text: `+${(p.gold ? 3 : 1) + (p.mat ? 1 : 0)}`, color: p.gold ? '#FFD23F' : '#F4F1E8', size: p.gold ? 40 : 32 });
+        fx.add('text', { ...R.matAt(p.house), text: `+${(p.gold ? 3 : 1) + (p.mat ? 1 : 0)}`, color: p.gold ? '#FFD23F' : '#F4F1E8', size: p.gold ? 40 : 32 });
       });
       return;
     }
@@ -937,7 +948,7 @@ function boot() {
     if (by && by !== S.net.room.me.id) {
       audio.play('boop');
       // A rival's parcel flies to the porch too.
-      fx.add('throw', { x0: h.dropX, y0: h.dropY, x1: h.doorX, y1: h.doorY, gold: a.gold, dur: 0.35 });
+      fx.add('throw', { x0: h.dropX, y0: h.dropY, x1: h.doorX, y1: h.doorY, house: h.id, gold: a.gold, dur: 0.45, onDone: () => R.greet(h.id, { gold: a.gold }) });
     }
     audio.play('ping');
   }
@@ -1054,6 +1065,7 @@ function boot() {
       return;
     }
     view.cam = S.cam;
+    view.fx = fx;
     view.paint = (view.paint || []).concat(fx.paint);
     view.drawWorldFx = (ctx) => {
       if (view.trail) drawTrail(ctx, view.trail);
@@ -1110,7 +1122,7 @@ function boot() {
       env: w.env,
       vans,
       rings: open.map((o) => ({ x: o.house.dropX, y: o.house.dropY, gold: o.gold })),
-      beacons: open.map((o) => ({ x: o.house.doorX, y: o.house.doorY - 10, gold: o.gold })),
+      beacons: open.map((o) => ({ ...R.matAt(o.house), gold: o.gold })),
       paint: [
         { lines: ['RIGHT', 'TURNS', 'ONLY'], x: 5.5 * T, y: 4.15 * T, upright: true, width: 112, max: 80, stretch: 1.45, alpha: 1 },
         { arrow: true, x: 5.5 * T, y: 2.45 * T, alpha: 1 },
@@ -1166,7 +1178,7 @@ function boot() {
       env: w.env,
       vans: [vanView(van, { color: '#FFC22E', body: BODY_IDS[S.profile.body] || 'box', parcels: Math.min(3, w.shift.lit.length), squash: so.squash })],
       rings: lit.map((h) => ({ x: h.dropX, y: h.dropY })),
-      beacons: lit.map((h) => ({ x: h.doorX, y: h.doorY - 10 })),
+      beacons: lit.map((h) => R.matAt(h)),
       depotGlow: depot && so.phase === 'drive',
       ghost: so.ghostPos && so.phase === 'drive' ? so.ghostPos : null,
       trail: S.mode === 'soloResults' ? w.shift.trail : null,
@@ -1304,7 +1316,7 @@ function boot() {
       env: w.env,
       vans,
       rings: open.map((o) => ({ x: o.house.dropX, y: o.house.dropY, gold: o.gold })),
-      beacons: open.map((o) => ({ x: o.house.doorX, y: o.house.doorY - 10, gold: o.gold, scale: o.gold ? 1.3 : 1 })),
+      beacons: open.map((o) => ({ ...R.matAt(o.house), gold: o.gold, scale: o.gold ? 1.3 : 1 })),
       depotGlow: playing && w.me.p <= 0,
       chevrons: chevronsFor(open, vans),
     };

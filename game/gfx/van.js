@@ -38,6 +38,13 @@ function shape(body) {
       trim.pop();
     }
   };
+  // The curl again on the roof, big, so the van reads as ours from above.
+  const curlTop = (x, y, r, rot = 0) => {
+    trim.push(x, y, 0, rot);
+    trim.disc(0, 0, 0, r, '#1E5BC6', 28);
+    ringArc(trim, r * 0.66, r * 0.22, -Math.PI * 0.95, Math.PI * 0.55, 0.006, '#F4F1E8', -1);
+    trim.pop();
+  };
   const lightsAt = (xf, xb, y, zOff = hw - 0.28) => {
     head.push([xf, y, -zOff], [xf, y, zOff]);
     tail.push([xb, y, -zOff], [xb, y, zOff]);
@@ -113,6 +120,7 @@ function shape(body) {
       [-1.1, 2.82, 0],
     ];
     curlSide(-0.6, 1.85, 0.42);
+    curlTop(0.75, 2.755, 0.46);
     lightsAt(2.41, -2.01, 0.95);
   } else if (body === 'mail') {
     // A mail truck: a short sloped hood and a tall square body, white with the blue stripe.
@@ -128,6 +136,7 @@ function shape(body) {
       [-1.4, 2.62, 0],
     ];
     curlSide(-0.6, 1.75, 0.42);
+    curlTop(0.55, 2.555, 0.46);
     lightsAt(2.41, -2.11, 0.95);
   } else if (body === 'icecream') {
     paint.box(1.85, 0.5, 0, 1.1, 0.85, W, '#ffffff');
@@ -177,6 +186,7 @@ function shape(body) {
       [-1.35, 2.72, 0],
     ];
     curlSide(-0.75, 1.62, 0.55);
+    curlTop(0.32, 2.715, 0.52);
     lightsAt(2.41, -2.41, 0.95);
   }
   // Everything has a chassis, bumpers, mirrors and wheel arches.

@@ -19,4 +19,4 @@ number.
 
 ## License
 
-MIT. The font (Barlow Condensed) is under the SIL Open Font License, in `game/fonts`.
+MIT. The font (Barlow Condensed) is under the SIL Open Font License, in `public/fonts`. Models are CC0 (Quaternius): see CREDITS.md.

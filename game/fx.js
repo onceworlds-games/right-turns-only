@@ -8,7 +8,7 @@ const MAX = 260;
 
 export function createFx() {
   const parts = [];
-  for (let i = 0; i < MAX; i++) parts.push({ on: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, size: 4, color: '#fff', kind: 0, rot: 0, vr: 0 });
+  for (let i = 0; i < MAX; i++) parts.push({ on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, g: 0, life: 0, max: 1, size: 4, color: '#fff', kind: 0, rot: 0, vr: 0 });
   const fx = {
     parts,
     throws: [], // parcels in the air: { x0, y0, x1, y1, t, dur, gold, mat, done }
@@ -39,7 +39,11 @@ export function createFx() {
       p.max = (opts.life ?? 0.6) * (0.7 + Math.random() * 0.6);
       p.size = (opts.size ?? 4) * (0.7 + Math.random() * 0.6);
       p.color = Array.isArray(opts.color) ? opts.color[(Math.random() * opts.color.length) | 0] : opts.color || '#fff';
-      p.kind = opts.kind ?? 0; // 0 dot, 1 square (confetti/parcels), 2 smoke (grows)
+      p.kind = opts.kind ?? 0; // 0 dot (a spark), 1 square (confetti, chips), 2 smoke (grows)
+      // Height (px above the ground) and how it falls: sparks drop fast, confetti flutters, smoke rises.
+      p.z = opts.z ?? 8;
+      p.vz = (opts.up ?? (p.kind === 2 ? 20 : sp * 0.9)) * (0.6 + Math.random() * 0.8);
+      p.g = opts.gravity ?? (p.kind === 2 ? -12 : p.kind === 1 ? 300 : 520);
       p.rot = Math.random() * 6;
       p.vr = (Math.random() - 0.5) * 10;
       p.drag = opts.drag ?? 2.5;
@@ -88,6 +92,16 @@ export function createFx() {
       p.vy *= k;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
+      p.vz -= p.g * dt;
+      if (p.kind === 1) p.vz *= Math.exp(-1.6 * dt); // flutter
+      p.z += p.vz * dt;
+      if (p.z < 0) {
+        p.z = 0;
+        p.vz = -p.vz * 0.3;
+        p.vx *= 0.5;
+        p.vy *= 0.5;
+        p.vr *= 0.5;
+      }
       p.rot += p.vr * dt;
     }
     for (const list of [fx.throws, fx.texts, fx.rings]) {
