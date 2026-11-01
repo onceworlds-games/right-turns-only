@@ -409,16 +409,18 @@ All drawn by the game's own renderer from `?poster=<name>` (`poster.js`), from s
 - **Icon** (512): the blue mandatory-direction plate with the white curl arrow, the yellow van riding it. No text.
 - **Badges** (256): bold symbols on coloured discs: a parcel, a loop of right turns, a parcel on a doormat, roundabout arrows,
   a stopwatch, a map pin, a gleaming van, a calendar with a curl, three stars.
-- **Trailer (~28 s):**
+- **Trailer** (`store/trailer.mp4`, 23.4 s, 1280×720 30 fps H.264 + AAC, 7.5 MB): real play with the game's own sound, six
+  hard cuts. Takes captured in virtual time from `?autoplay=1&town=n&zoom=k` (the bot brain at skill 1 drives the player's van),
+  `?autoplay=1&scramble=1&zoom=1.25` (a full scramble shift with five bots) and `?title=1` with the Play sign hidden.
 
 | Time | Shot |
 |---|---|
-| 0-3 s | The van already mid-curl round a roundabout, out and straight through a ring: parcel, ding-dong (the goal in 3 s) |
-| 3-8 s | Three rights make a left: the van loops a block to reach a house on its left, the turns ticking |
-| 8-15 s | Downtown chain: lights, near misses, a pedestrian leap, three deliveries in a row |
-| 15-20 s | Variety: snow slide in Frostby, headlights in Neon Heights |
-| 20-26 s | Scramble: six vans converge on the golden last call; one takes it on the mat |
-| 26-28 s | Winner donuts; RIGHT TURNS ONLY painted on the road over gameplay |
+| 0-4.2 s | Maple Row: the yellow van past HOLD TO TURN RIGHT on the road, into a ring (−2.0 off the clock), THREE RIGHTS MAKE A LEFT |
+| 4.2-8.2 s | Fiveways: HOLD TO GO ROUND; the van orbits a mini-roundabout, comes out and delivers (+1) |
+| 8.2-12.2 s | Frostby: the van slides round a snowy bend past the blue cars |
+| 12.2-16.4 s | Neon Heights scramble: LAST CALL ×3 lands at 0:20, the van takes it, TAKEN, the plates reshuffle |
+| 16.4-19.4 s | SHIFT 1 DONE: every van's trail over the whole town |
+| 19.4-23.4 s | The title street: RIGHT TURNS ONLY painted on the avenue, traffic and vans going by; fade out |
 
 ## Originality check
 
