@@ -259,8 +259,8 @@ export function createRenderer(hud, opts = {}) {
       dyn.doorByHouse = new Map(doors.filter((d) => d.house >= 0).map((d) => [d.house, d]));
     }
     for (const br of data.bridges) dyn.bridges.push(makeDrawbridge(br, city, group));
-    // No GPU: no reflections of the sky (its programs and passes cost seconds there).
-    return { city, style, data, group, dyn, env: software ? null : envFor(city, style) };
+    // No GPU: no reflections of the sky (its programs and passes cost seconds there). Store art keeps them.
+    return { city, style, data, group, dyn, env: software && !opts.full ? null : envFor(city, style) };
   }
 
   function setDoor(im, d) {

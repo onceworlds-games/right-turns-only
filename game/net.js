@@ -415,7 +415,10 @@ export function createNet(room, helpers, opts = {}) {
           out.push({ type: 'grab', l });
           Promise.resolve(grab({ l }))
             .then((res) => {
-              if (res === 'won') return;
+              if (res === 'won') {
+                if (net.onGrabWon) net.onGrabWon();
+                return;
+              }
               w.me.p = Math.max(0, w.me.p - 1);
               if (net.onGrabLost) net.onGrabLost(res);
             })

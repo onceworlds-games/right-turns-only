@@ -55,7 +55,7 @@ export async function renderPoster(name) {
     document.body.dataset.ready = '1';
     return;
   }
-  const R = createRenderer(cv, { preserve: true });
+  const R = createRenderer(cv, { preserve: true, full: true });
   R.resize(W, H, 1);
   R.quality = 'high';
   const people = createPeopleLayer(R);
@@ -372,13 +372,13 @@ function stage(city, vans, c, box) {
       const sx = x + Math.sin(h) * 30; // keep left
       const sy = y - Math.cos(h) * 30;
       const d = Math.hypot(sx - c.x, sy - c.y);
-      if (d < 170 || !inBox(sx, sy, 60)) continue;
+      if (d < 130 || !inBox(sx, sy, 45)) continue;
       spots.push({ x: sx, y: sy, h, d });
     }
   }
   spots.sort((p, q) => p.d - q.d);
   for (const v of away) {
-    const s = spots.find((p) => taken.every(([x, y]) => Math.hypot(p.x - x, p.y - y) > 190));
+    const s = spots.find((p) => taken.every(([x, y]) => Math.hypot(p.x - x, p.y - y) > 140));
     if (!s) continue;
     Object.assign(v, { x: s.x, y: s.y, h: s.h, v: 240, hold: false, stall: 0, braking: false, parcels: 2 });
     taken.push([s.x, s.y]);
@@ -713,6 +713,42 @@ function drawBadge(g, S, id) {
       g.fillStyle = PALETTE.yellow;
       g.fill();
       g.restore();
+      break;
+    }
+    case 'finders-keepers': {
+      // A parcel knocked loose: a bang behind it and speed lines.
+      disc(g, S, '#E2574C');
+      g.save();
+      g.translate(c + 10, c - 4);
+      g.fillStyle = PALETTE.yellow;
+      g.beginPath();
+      for (let i = 0; i < 18; i++) {
+        const a = (i * Math.PI) / 9 + 0.1;
+        const r = i % 2 ? 40 : 72;
+        g.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      g.closePath();
+      g.fill();
+      g.strokeStyle = ink;
+      g.lineWidth = 5;
+      g.lineJoin = 'round';
+      g.stroke();
+      g.rotate(0.38);
+      g.drawImage(bigParcel(false).c, -46, -46, 92, 92);
+      g.restore();
+      g.strokeStyle = paint;
+      g.lineCap = 'round';
+      g.lineWidth = 9;
+      for (const [x, y, l] of [
+        [c - 88, c - 32, 24],
+        [c - 96, c + 2, 34],
+        [c - 86, c + 36, 22],
+      ]) {
+        g.beginPath();
+        g.moveTo(x, y);
+        g.lineTo(x + l, y);
+        g.stroke();
+      }
       break;
     }
     default:

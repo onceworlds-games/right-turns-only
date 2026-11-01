@@ -228,6 +228,7 @@ export function boot(joining, net) {
       net.match.on('change', () => lobbyStrip());
       net.match.on('results', (standings, mine) => onResults(standings, mine));
       net.onDrop = (res, p) => onMyDrop(res, p);
+      net.onGrabWon = () => award('finders-keepers');
       net.onGrabLost = () => {
         const w = S.net && S.net.world;
         if (!w) return;
