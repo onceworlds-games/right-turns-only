@@ -135,7 +135,11 @@ export function createScrambleWorld(town, opts = {}) {
   const w = { town, city, traffic, data, runners, t: 0, seconds, env: { closed: new Set(), bridgeUp: false, cars: [], vans: [], t: 0 }, done: false };
   let closureK = town.cones ? scrambleClosure(0) : 0;
   if (closureK) w.env.closed = closedTiles(city, closureK);
-  const avoid = () => (closureK ? trapHouses(city) : null);
+  const avoid = () => {
+    if (!closureK) return opts.avoid || null;
+    if (!opts.avoid) return trapHouses(city);
+    return new Set([...trapHouses(city), ...opts.avoid]);
+  };
   fillAddresses(city, data, runners.map((r) => r.van), rand, runners.length, avoid());
 
   w.graph = () => graphFor(city, w.env.closed, `k${closureK}`);

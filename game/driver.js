@@ -1,6 +1,7 @@
 // The bot brain, also used for autoplay: pick where to go, plan it in right turns, then drive the line with one button.
-// Driving: every few frames, roll the van forward for a few input plans (release, tap, holds of several lengths) and keep the
-// one that stays nearest the line while getting furthest along it. Skill sets reaction time, mistakes and choices.
+// Driving: pure pursuit (hold while a point ahead on the line is to the right), taps on straights, hold-until-facing-out in loop
+// zones, and a short physics look-ahead that swaps the input when it would hit something. Skill sets reaction time, mistakes
+// and choices.
 // Pure: no page, no platform.
 
 import { T, DX, DY, DIR_HEADING, DRIVE, DELIVERY, clamp, angleDiff, dirOf } from './config.js';

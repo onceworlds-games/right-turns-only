@@ -1,5 +1,5 @@
 // Routing with right turns only: a graph over (tile, direction). From each state a van can go straight on, turn right, or, in a
-// loop zone (roundabout or bulb), leave by any arm. Used by the bots, the first town's guide chevrons and the last-call pick.
+// loop zone (roundabout or bulb), leave by any arm. Used by the bots, par times and the last-call pick.
 // Pure: no page, no platform.
 
 import { T, DX, DY, DRIVE } from './config.js';
@@ -146,9 +146,4 @@ export function pathTo(result, node) {
 /** The tile a house's drop point is on. */
 export function dropTile(city, house) {
   return city.idx(Math.floor(house.dropX / T), Math.floor(house.dropY / T));
-}
-
-/** Right-turn travel time between two tiles from a given state (used for the last call and planning). */
-export function travelTime(graph, fromNode, tileIndex) {
-  return bestTo(dijkstra(graph, fromNode), tileIndex).time;
 }

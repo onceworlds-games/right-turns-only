@@ -92,11 +92,6 @@ export function starsFor(time, expert) {
   return 1;
 }
 
-/** Star thresholds in seconds (for the town card). */
-export function starTimes(expert) {
-  return { two: expert * STARS.two, three: expert * STARS.three };
-}
-
 /**
  * Track one van's passes through a set of rings. `step(van, lit)` returns the houses it delivered to this step:
  * [{ house, mat, x, y, d, v }]. A pass counts at its closest point to the drop.
@@ -245,7 +240,6 @@ export function createShift(city, opts = {}) {
   s.needsDepot = () => !s.lit.length && s.queue.length > 0;
   return s;
 }
-
 
 /**
  * The shortest the shift could take in right turns: each load in its best order, from the depot and back, at the van's

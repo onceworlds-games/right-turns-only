@@ -91,6 +91,7 @@ export const TOWNS = [
     cars: 14,
     start: 0,
     lights: true,
+    buses: true,
     music: 'disco',
     palette: { lawn: '#6E9C5C', lawn2: '#5F8B4E', asphalt: '#33373E', pave: '#C9C3B8', hedge: '#47703F', roofs: ['#8C96A3', '#C9B79C', '#6F8FA8', '#B5776A', '#9AA88C'], water: '#3E8FC4', tint: null },
     map: [
@@ -317,4 +318,25 @@ export const TOWNS = [
   },
 ];
 
-export const townById = (id) => TOWNS.find((t) => t.id === id) || TOWNS[0];
+/** The title screen's street: a long avenue up the middle for the painted title, loops at both ends. Not on the Route. */
+export const TITLE_TOWN = {
+  id: 0,
+  name: 'Clockwise Couriers',
+  parcels: 9,
+  cars: 3,
+  start: 0,
+  soft: true,
+  music: 'sunny',
+  palette: TOWNS[0].palette,
+  map: [
+    'xxxxxxxxxxx',
+    'xc...O...cx',
+    'x.hhg.ghh.x',
+    'x.hhh.hhh.x',
+    'x.hhh.hhh.x',
+    'x.hhh.hhh.x',
+    'xDQhg.ghh.x',
+    'xc...O...cx',
+    'xxxxxxxxxxx',
+  ],
+};

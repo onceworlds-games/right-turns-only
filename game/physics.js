@@ -26,11 +26,6 @@ export function createVan(x, y, heading, v = 0) {
   };
 }
 
-/** Copy only what the simulation needs (bots' look-ahead). */
-export function cloneVan(v) {
-  return { ...v, zone: v.zone };
-}
-
 /** The nearest cardinal direction to a heading (0..3) and the signed error to it. */
 function nearestDir(h) {
   let best = 0;
@@ -317,6 +312,7 @@ function collideCars(van, env, events) {
   const c = Math.cos(van.h);
   const s = Math.sin(van.h);
   for (const car of env.cars) {
+    if (car.walker) continue; // people always leap clear (drawn by the renderer); they never stop a van
     const dx0 = car.x - van.x;
     const dy0 = car.y - van.y;
     const reach = car.len / 2 + VAN.len / 2 + 8;

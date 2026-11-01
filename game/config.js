@@ -4,7 +4,6 @@
 export const T = 120; // a tile, in world px
 export const DT = 1 / 60; // the fixed simulation step
 
-export const DIRS = 4; // 0 north, 1 east, 2 south, 3 west (a right turn is +1)
 export const DX = [0, 1, 0, -1];
 export const DY = [-1, 0, 1, 0];
 export const DIR_HEADING = [-Math.PI / 2, 0, Math.PI / 2, Math.PI];
@@ -141,10 +140,7 @@ export const BOTS = [
   { name: 'Vik', style: 'steady', skill: 0.65 },
 ];
 
-export const BADGES = ['first-drop', 'three-rights', 'doormat', 'roundabout-regular', 'rush-hour', 'twelve-towns', 'no-scratches', 'daily-driver', 'all-stars'];
-
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-export const lerp = (a, b, t) => a + (b - a) * t;
 /** The smallest signed angle from a to b. */
 export function angleDiff(a, b) {
   let d = (b - a) % (Math.PI * 2);
