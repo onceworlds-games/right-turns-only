@@ -246,6 +246,12 @@ export function createUI(root, h) {
       else st.append(starsEl(d.stars[town.id] || 0, 3, best ? fmtTime(best) : ''));
       txt.append(st);
       b.append(txt);
+      // The town's challenge medal, once won.
+      if (!locked && d.medals && d.medals[town.id]) {
+        const m = el('span', 'medal', '★');
+        m.title = 'Challenge medal';
+        b.append(m);
+      }
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         if (locked) ui.toast(`Finish ${TOWNS[i - 1].name} first`);
@@ -260,7 +266,7 @@ export function createUI(root, h) {
     s.append(p);
   };
 
-  /** A town's card (or the daily's). d: { title, sub, best, two, three, par, top: [{ name, time, me }] | null, daily } */
+  /** A town's card (or the daily's). d: { title, sub, best, two, three, par, top: [{ name, time, me }] | null, daily, challenge: { text, done } } */
   ui.card = (d) => {
     const s = screen('card');
     s.style.justifyContent = 'flex-end';
@@ -284,6 +290,11 @@ export function createUI(root, h) {
     facts.append(starFact(d.two, 2));
     facts.append(starFact(d.three, 3));
     p.append(facts);
+    if (d.challenge) {
+      const c = el('div', d.challenge.done ? 'challenge done' : 'challenge');
+      c.append(el('b', '', d.challenge.done ? 'MEDAL ✓' : 'CHALLENGE'), el('span', '', d.challenge.text));
+      p.append(c);
+    }
     const list = el('ul', 'top5');
     if (!d.top) list.append(el('li', 'empty', 'Times load when you sign in'));
     else if (!d.top.length) list.append(el('li', 'empty', d.daily ? 'Nobody yet today. Be first.' : 'No times yet. Be first.'));

@@ -181,6 +181,26 @@ export function createPost(renderer) {
     renderer.render(scene, cam);
   };
 
+  /**
+   * Build one of the chain's shader programs not built yet (see the renderer's warm-up): true when one was, false when all are.
+   * `done` holds what is built.
+   */
+  post.warmOne = (done) => {
+    for (const [m, toScreen] of [[down, false], [bright, false], [blur, false], [final, true]]) {
+      const key = `post${m.id}.${m.version}`;
+      if (done.has(key)) continue;
+      done.add(key);
+      quad.material = m;
+      renderer.setRenderTarget(toScreen ? null : post.targets.halfA);
+      for (const mat of renderer.compile(scene, cam)) {
+        const program = renderer.properties.get(mat).currentProgram;
+        if (program) program.getUniforms();
+      }
+      return true;
+    }
+    return false;
+  };
+
   /** Render `world` with `camera` through the chain to the screen. o: { tilt, bloom, threshold } */
   post.render = (world, camera, o) => {
     const T = post.targets;

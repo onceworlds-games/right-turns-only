@@ -1,6 +1,6 @@
 // Right Turns Only: the page. Screens, input, the solo shift loop, the scramble glue, the camera and the HUD.
 
-import { T, DT, DX, DY, DIR_HEADING, DELIVERY, SCRAMBLE, SEATS, BOTS, VAN_BODIES, PALETTE, STARS, clamp, dirOf, angleDiff } from './config.js';
+import { T, DT, DX, DY, DIR_HEADING, DELIVERY, SCRAMBLE, KNOCK, SEATS, BOTS, VAN_BODIES, PALETTE, STARS, clamp, dirOf, angleDiff } from './config.js';
 import { TOWNS, TITLE_TOWN } from './towns.js';
 import { createRenderer } from './gfx/renderer.js';
 import { createVansLayer } from './gfx/vans-layer.js';
@@ -19,8 +19,8 @@ import { starsFor, minPlausible, DAILY_PARCELS } from './shift.js';
 import { createRecorder, decodeGhost, ghostAt } from './ghost.js';
 import { createDriver, graphFor, houseTarget, depotTarget } from './driver.js';
 import { dayNumber } from './rng.js';
-import { connect, shiftTime, topperOf } from './net.js';
-import { createFlow, createMoves, tipFor, settleShift, rankOf, PAINTS, TOPPERS, TRAILS, progressOf, isUnlocked, unlockText, jobsFor, jobProgress, streakNow } from './career.js';
+import { shiftTime, topperOf, wrapOf } from './net.js';
+import { createFlow, createMoves, tipFor, settleShift, rankOf, PAINTS, TOPPERS, TRAILS, WRAPS, progressOf, isUnlocked, unlockText, jobsFor, jobProgress, streakNow, CHALLENGES } from './career.js';
 import { openList, scrambleTargets } from './scramble.js';
 
 const ow = globalThis.onceworlds || null;
@@ -28,14 +28,11 @@ const params = new URLSearchParams(location.search);
 const BODY_IDS = ['box', 'bread', 'pickup', 'mail', 'tuk', 'icecream', 'gold'];
 const PITCH = (59 * Math.PI) / 180; // the renderer's standard camera tilt
 const court = createForecourt();
+// Capture and debug flags only work off onceworlds.com: on the local platform (*.localhost) and the dev server.
+const production = !import.meta.env.DEV && !/(^|\.)localhost$|^127\.0\.0\.1$/.test(location.hostname);
 
-if (params.has('poster')) {
-  import('./poster.js').then((m) => m.renderPoster(params.get('poster')));
-} else {
-  boot();
-}
-
-function boot() {
+/** joining: the join (resolves to the net, or null); net: what it resolved to already, undefined while it hasn't. */
+export function boot(joining, net) {
   const cv = document.getElementById('cv');
   const R = createRenderer(cv);
   const people = createPeopleLayer(R);
@@ -43,11 +40,12 @@ function boot() {
   R.greet = people.greet;
   const fx = createFx();
   const audio = createAudio();
-  const production = ow ? ow.mode === 'production' : !import.meta.env.DEV;
   const autoplay = !production && params.get('autoplay') === '1';
   // Capture only: a closer camera for footage (outside production).
   const zoomBoost = production ? 1 : clamp(Number(params.get('zoom')) || 1, 0.5, 2.5);
   const noHints = !production && params.get('hints') === '0';
+  // Capture only: dress the van (?look=paint.topper.trail.wrap) without unlocking anything.
+  const lookParam = !production && params.has('look') ? params.get('look').split('.') : null;
 
   const S = {
     mode: '',
@@ -120,19 +118,64 @@ function boot() {
 
   // ------------------------------------------------------------ sizing, fonts, platform
 
-  function pixelRatio() {
+  // Quality: the player's Graphics choice in the platform menu is the ceiling; under it (and with Auto) the game's own
+  // governor times its frames and steps the quality, then the resolution, down when they're slow and back up carefully.
+  // Without a GPU it starts at the bottom.
+  const QUALITY = ['low', 'medium', 'high'];
+  const SCALES = [0.5, 0.75, 1];
+  const touchFirst = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const gov = { q: R.software ? 0 : touchFirst ? 1 : 2, s: R.software ? 0 : 2, frames: [], since: 0, good: 0, failedAt: {} };
+  function choice() {
     try {
-      if (ow && ow.settings) return ow.settings.pixelRatio(2);
+      const c = ow && ow.settings ? ow.settings.choice : 'auto';
+      return QUALITY.includes(c) ? c : 'auto';
     } catch {
-      /* fall through */
+      return 'auto';
     }
-    return Math.min(2, devicePixelRatio || 1);
+  }
+  function quality() {
+    const c = choice();
+    return QUALITY[c === 'auto' ? gov.q : Math.min(QUALITY.indexOf(c), gov.q)];
+  }
+  function pixelRatio() {
+    return Math.max(0.5, Math.min(2, devicePixelRatio || 1) * SCALES[gov.s]);
+  }
+  /** Time a frame; every 1.5 s (or 3 slow frames) decide whether to step down, every 8 s of fast frames whether to step up. */
+  function governFrame(ms) {
+    if (document.hidden || ms > 6000) return (gov.frames.length = 0);
+    gov.frames.push(ms);
+    gov.since += ms;
+    if (gov.since < 1500 && !(gov.frames.length >= 3 && gov.since > 900)) return;
+    const avg = gov.since / gov.frames.length;
+    gov.frames.length = 0;
+    gov.since = 0;
+    const level = gov.q * 3 + gov.s; // 0 (low, half) .. 8 (high, full)
+    if (avg > 40 && level > 0) {
+      gov.failedAt[level] = performance.now();
+      gov.good = 0;
+      // Resolution first while the quality is still high, then the quality.
+      if (gov.s > 1 && gov.q === 2) gov.s--;
+      else if (gov.q > 0) gov.q--;
+      else gov.s--;
+      resize();
+    } else if (avg < 19) {
+      gov.good += 1;
+      const up = gov.s < 2 ? gov.q * 3 + gov.s + 1 : gov.q < 2 && !R.software ? (gov.q + 1) * 3 + gov.s : -1;
+      // A level that was too slow is tried again only after a minute.
+      if (up >= 0 && gov.good >= 5 && performance.now() - (gov.failedAt[up] || -1e9) > 60000) {
+        gov.good = 0;
+        if (gov.s < 2) gov.s++;
+        else gov.q++;
+        resize();
+      }
+    } else gov.good = 0;
   }
   function resize() {
     S.w = innerWidth;
     S.h = innerHeight;
     R.resize(S.w, S.h, pixelRatio());
-    R.quality = ow && ow.settings ? ow.settings.quality : 'high';
+    R.quality = quality();
+    fx.lite = R.quality === 'low';
     relayout();
   }
   /** DOM screens placed around the platform's pieces are placed again when those (or the window) move. */
@@ -162,10 +205,8 @@ function boot() {
       ow.settings.on('change', () => {
         resize();
         fx.reduced = !!ow.settings.reducedMotion;
-        fx.lite = ow.settings.quality === 'low';
       });
       fx.reduced = !!ow.settings.reducedMotion;
-      fx.lite = ow.settings.quality === 'low';
     } catch {
       /* every optional API is guarded */
     }
@@ -174,28 +215,29 @@ function boot() {
     if (document.hidden && S.mode === 'solo' && S.solo && S.solo.phase === 'drive') pause();
   });
 
-  // Join first, then everything else.
+  /** The room is in: listen to it. */
+  function attach(net) {
+    if (!net || S.net) return;
+    S.net = net;
+    syncLook();
+    const room = net.room;
+    room.on('close', (reason) => closed(reason));
+    if (net.match) {
+      net.match.on('change', () => lobbyStrip());
+      net.match.on('results', (standings, mine) => onResults(standings, mine));
+      net.onDrop = (res, p) => onMyDrop(res, p);
+      net.onGrabLost = () => {
+        const w = S.net && S.net.world;
+        if (!w) return;
+        audio.play('boop');
+        fx.add('text', { x: w.me.van.x, y: w.me.van.y - 20, text: 'TAKEN', color: '#D9573B', size: 28 });
+      };
+    }
+    lobbyStrip();
+  }
   if (ow) {
-    connect(ow, (room) => {
-      // The Ready strip only belongs on the yard: hide it at once, before the helpers load.
-      try {
-        if (S.mode !== 'yard' && room.hideLobby) room.hideLobby(true);
-      } catch {
-        /* older rooms */
-      }
-    }).then((net) => {
-      if (!net) return;
-      S.net = net;
-      syncLook();
-      const room = net.room;
-      room.on('close', (reason) => closed(reason));
-      if (net.match) {
-        net.match.on('change', () => lobbyStrip());
-        net.match.on('results', (standings, mine) => onResults(standings, mine));
-        net.onDrop = (res, p) => onMyDrop(res, p);
-      }
-      lobbyStrip();
-    });
+    if (net !== undefined) attach(net);
+    else joining.then(attach);
     loadProfile();
   }
 
@@ -420,7 +462,15 @@ function boot() {
       const it = list.find((i) => i.id === id);
       return it && isUnlocked(it, pr) ? it : list[0];
     };
-    return { body: BODY_IDS[myBody()] || 'box', color: pick(PAINTS, g.paint).color, topper: pick(TOPPERS, g.topper).id, trail: pick(TRAILS, g.trail).id };
+    const look = { body: BODY_IDS[myBody()] || 'box', color: pick(PAINTS, g.paint).color, topper: pick(TOPPERS, g.topper).id, trail: pick(TRAILS, g.trail).id, wrap: pick(WRAPS, g.wrap).id };
+    if (lookParam) {
+      const [paint, topper, trail, wrap] = lookParam;
+      if (WRAPS.some((i) => i.id === wrap)) look.wrap = wrap;
+      if (PAINTS.some((i) => i.id === paint)) look.color = PAINTS.find((i) => i.id === paint).color;
+      if (TOPPERS.some((i) => i.id === topper)) look.topper = topper;
+      if (TRAILS.some((i) => i.id === trail)) look.trail = trail;
+    }
+    return look;
   }
 
   /** What other players see of my van. */
@@ -428,11 +478,12 @@ function boot() {
     if (!S.net) return;
     S.net.myBody = myBody();
     S.net.myTopper = myLook().topper;
+    S.net.myWrap = myLook().wrap;
   }
 
   function unlockedCount() {
     const pr = progressOf(S.profile);
-    return [VAN_BODIES, PAINTS, TOPPERS, TRAILS].reduce((a, list) => a + list.filter((i) => isUnlocked(i, pr)).length, 0);
+    return [VAN_BODIES, PAINTS, TOPPERS, TRAILS, WRAPS].reduce((a, list) => a + list.filter((i) => isUnlocked(i, pr)).length, 0);
   }
 
   function toGarage() {
@@ -460,6 +511,7 @@ function boot() {
         paint: { label: 'PAINT', items: PAINTS.map((it) => ({ id: it.id, name: it.name, swatch: it.color, locked: !isUnlocked(it, pr), cond: cond(it), on: it.color === look.color && it.id === (g.paint || 'courier') })) },
         topper: { label: 'TOPPER', items: TOPPERS.map((it) => ({ id: it.id, name: it.name, swatch: TOPPER_SWATCH[it.id], locked: !isUnlocked(it, pr), cond: cond(it), on: it.id === look.topper })) },
         trail: { label: 'TRAIL', items: TRAILS.map((it) => ({ id: it.id, name: it.name, swatch: TRAIL_SWATCH[it.id], locked: !isUnlocked(it, pr), cond: cond(it), on: it.id === look.trail })) },
+        wrap: { label: 'WRAP', items: WRAPS.map((it) => ({ id: it.id, name: it.name, swatch: `linear-gradient(90deg, ${it.card} 0 42%, ${it.tape} 42% 58%, ${it.card} 58%)`, locked: !isUnlocked(it, pr), cond: cond(it), on: it.id === look.wrap })) },
       },
     });
   }
@@ -477,7 +529,7 @@ function boot() {
 
   function toRoute() {
     setMode('route');
-    ui.route({ unlocked: S.profile.unlocked, best: S.profile.best, stars: S.profile.stars });
+    ui.route({ unlocked: S.profile.unlocked, best: S.profile.best, stars: S.profile.stars, medals: S.profile.medals });
     setPreview(TOWNS[Math.min(TOWNS.length, S.profile.unlocked) - 1]);
   }
 
@@ -499,7 +551,7 @@ function boot() {
     const par = parFor(town);
     const show = (top) => {
       if (S.mode !== 'card' || S.preview.town !== town) return;
-      ui.card({ title: town.name, sub: `${town.parcels} PARCELS`, best: S.profile.best[town.id], two: par * STARS.two, three: par * STARS.three, top });
+      ui.card({ title: town.name, sub: `${town.parcels} PARCELS`, best: S.profile.best[town.id], two: par * STARS.two, three: par * STARS.three, top, challenge: CHALLENGES[town.id] ? { text: CHALLENGES[town.id].text, done: !!(S.profile.medals && S.profile.medals[town.id]) } : null });
     };
     show(ow ? [] : null);
     if (ow) {
@@ -953,13 +1005,14 @@ function boot() {
       y1: house.doorY,
       house: house.id,
       gold,
+      wrap: myLook().wrap,
       dur: mat ? 0.5 : 0.58,
       onDone() {
         audio.play('thud');
         const at = R.matAt(house);
         fx.spawn(at.x, at.y, 8, { color: '#D8C9A8', kind: 2, speed: 40, life: 0.6, size: 5, z: 2 });
         fx.spawn(at.x, at.y, gold ? 22 : 10, { color: gold ? ['#FFD23F', '#FFFFFF'] : ['#FFC22E', '#F4F1E8'], kind: 1, speed: 70, up: 140, life: 1.0, size: 4, z: 10 });
-        R.greet(house.id, { gold, mat });
+        R.greet(house.id, { gold, mat, wrap: myLook().wrap });
         if (onLand) onLand();
       },
     });
@@ -1167,6 +1220,9 @@ function boot() {
       const ids = new Set((m.data ? m.data.addrs : []).map((a) => a.id));
       if (S.scr.prevAddrs) for (const a of S.scr.prevAddrs) if (!ids.has(a.id)) addrClosed(a, w, m);
       S.scr.prevAddrs = m.data ? m.data.addrs.slice() : [];
+      if (S.scr.looseRound !== m.roundId) S.scr.prevLoose = null;
+      S.scr.looseRound = m.roundId;
+      looseChanged(m.data, w);
     } else audio.drive(false, 0, false, 0);
     publish(net.playing() && phase === 'round' ? 'play' : 'watch');
   }
@@ -1188,7 +1244,39 @@ function boot() {
       audio.play('load');
       return;
     }
+    if (e.type === 'knocked') {
+      // A hard hit: a parcel tumbles off the roof into the road.
+      audio.play('bump');
+      audio.play('taken');
+      fx.kick(0.3);
+      fx.add('throw', { x0: e.x, y0: e.y, x1: e.x, y1: e.y, dur: 0.55, wrap: myLook().wrap });
+      fx.add('text', { x: e.x, y: e.y - 20, text: 'KNOCKED OFF!', color: '#FF7A59', size: 30, dur: 1.1 });
+      return;
+    }
+    if (e.type === 'grab') {
+      audio.play('load');
+      fx.add('text', { x: w.me.van.x, y: w.me.van.y - 20, text: '+1 PARCEL', color: '#9BE37A', size: 28, dur: 1 });
+      fx.spawn(w.me.van.x, w.me.van.y, 10, { color: ['#C8925A', '#F4F1E8'], kind: 1, speed: 120, up: 120, life: 0.6, size: 4, z: 10 });
+      return;
+    }
     physicsFx(e, w.me.van);
+  }
+
+  /** Loose parcels that came or went since the last frame: a puff where one lands, a poof where someone takes it. */
+  function looseChanged(data, w) {
+    const now = new Map(((data && data.loose) || []).map((l) => [l.id, l]));
+    const before = S.scr.prevLoose;
+    if (before) {
+      for (const [id, l] of now) {
+        if (before.has(id)) continue;
+        fx.spawn(l.x, l.y, 10, { color: ['#C8925A', '#D8C9A8'], kind: 2, speed: 60, life: 0.6, size: 5, z: 2 });
+        // Not mine (mine already said so): a word over it so the race to grab it starts.
+        const mine = S.net && S.net.playing() && Math.hypot(w.me.van.x - l.x, w.me.van.y - l.y) < 60 && w.me.knockT > 0;
+        if (!mine) fx.add('text', { x: l.x, y: l.y - 16, text: 'LOOSE!', color: '#F4F1E8', size: 24, dur: 0.9, small: true });
+      }
+      for (const [id, l] of before) if (!now.has(id)) fx.spawn(l.x, l.y, 8, { color: ['#F4F1E8', '#C8925A'], kind: 1, speed: 90, up: 90, life: 0.45, size: 3, z: 6 });
+    }
+    S.scr.prevLoose = now;
   }
 
   function addrClosed(a, w, m) {
@@ -1436,7 +1524,7 @@ function boot() {
       env: w.env,
       vans: [vanView(van, { ...myLook(), parcels: Math.min(3, w.shift.lit.length), squash: so.squash })],
       rings: lit.map((h) => ({ x: h.dropX, y: h.dropY })).concat(w.shift.express && so.phase === 'drive' ? [{ x: w.shift.express.house.dropX, y: w.shift.express.house.dropY, gold: true }] : []),
-      beacons: lit.map((h) => R.matAt(h)).concat(w.shift.express && so.phase === 'drive' ? [{ ...R.matAt(w.shift.express.house), gold: true, scale: 1.3 }] : []),
+      beacons: lit.map((h) => ({ ...R.matAt(h), wrap: myLook().wrap })).concat(w.shift.express && so.phase === 'drive' ? [{ ...R.matAt(w.shift.express.house), gold: true, scale: 1.3 }] : []),
       depotGlow: depot && so.phase === 'drive',
       ghost: so.ghostPos && so.phase === 'drive' ? so.ghostPos : null,
     };
@@ -1582,7 +1670,7 @@ function boot() {
     m.seats.forEach((seat, i) => {
       const look = seatLook(i, seat, 0);
       if (seat.me && playing) {
-        vans.push(vanView(w.me.van, { ...seatLook(i, seat, myBody()), topper: myLook().topper, parcels: w.me.p, me: true }));
+        vans.push(vanView(w.me.van, { ...seatLook(i, seat, myBody()), topper: myLook().topper, wrap: myLook().wrap, parcels: w.me.p, me: true }));
         return;
       }
       const o = others.find((v) => v.id === seat.id);
@@ -1599,6 +1687,8 @@ function boot() {
         color: look.color,
         symbol: look.symbol,
         body: seat.bot ? BODY_IDS[i % 4] : BODY_IDS[o.body] || 'box',
+        topper: seat.bot ? 'none' : o.tp,
+        wrap: seat.bot ? 'kraft' : o.wr,
         away: o.away,
         tag: tagged ? seat.name : null,
       });
@@ -1608,7 +1698,10 @@ function boot() {
       env: w.env,
       vans,
       rings: open.map((o) => ({ x: o.house.dropX, y: o.house.dropY, gold: o.gold })),
-      beacons: open.map((o) => ({ ...R.matAt(o.house), gold: o.gold, scale: o.gold ? 1.3 : 1 })),
+      beacons: open
+        .map((o) => ({ ...R.matAt(o.house), gold: o.gold, scale: o.gold ? 1.3 : 1 }))
+        // Parcels knocked into the road: low over the asphalt, white, for anyone with room on the roof.
+        .concat(between ? [] : (data.loose || []).filter((l) => m.elapsed - l.at > KNOCK.settle * 1000).map((l) => ({ x: l.x, y: l.y, height: 1.6, size: 0.8, color: '#F4F1E8', scale: 0.55 }))),
       depotGlow: playing && w.me.p <= 0,
       chevrons: chevronsFor(open, vans),
     };
@@ -1741,7 +1834,7 @@ function boot() {
     players.slice(0, 6).forEach((p) => {
       const pres = p.presence || {};
       const me = p.id === meId;
-      seats.push({ name: String(p.name || 'Player').slice(0, 24), me, body: me ? myBody() : Number.isInteger(pres.body) ? clamp(pres.body, 0, 6) : 0, topper: me ? mine : topperOf(pres.tp), ready: !!p.ready, host: room.host === p.id });
+      seats.push({ name: String(p.name || 'Player').slice(0, 24), me, body: me ? myBody() : Number.isInteger(pres.body) ? clamp(pres.body, 0, 6) : 0, topper: me ? mine : topperOf(pres.tp), wrap: me ? myLook().wrap : wrapOf(pres.wr), ready: !!p.ready, host: room.host === p.id });
     });
     let b = 0;
     while (seats.length < 6) {
@@ -1795,7 +1888,7 @@ function boot() {
       const pres = (pl && pl.presence) || {};
       const pb = pres.body;
       const body = me ? myBody() : Number.isInteger(pb) && pb >= 0 && pb < VAN_BODIES.length ? pb : Math.max(0, i) % 4;
-      return { place: s.place, name: s.name, pts: s.points ?? m.scores[s.id] ?? 0, color: look.color, symbol: look.symbol, me, body, topper: me ? myLook().topper : topperOf(pres.tp) };
+      return { place: s.place, name: s.name, pts: s.points ?? m.scores[s.id] ?? 0, color: look.color, symbol: look.symbol, me, body, topper: me ? myLook().topper : topperOf(pres.tp), wrap: me ? myLook().wrap : wrapOf(pres.wr) };
     });
     const view = court.podium({ w: S.w, h: S.h }, rows, S.t, dt, { top: topInset() + 90, bottom: bottomInset(false) + 70 }, fx);
     const hud = view.hud;
@@ -1815,6 +1908,7 @@ function boot() {
     // performance.now(), not the frame's timestamp: the two can disagree when the page's clock is driven (captures).
     const now = performance.now();
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    governFrame(now - last);
     last = now;
     S.t += dt;
     // Juice on solo shifts only (a scramble keeps the shared clock): a beat of slow motion as the last parcel lands, a
@@ -1885,32 +1979,40 @@ function boot() {
     if (S.mode !== 'solo' && S.mode !== 'scramble') audio.drive(false, 0, false, 0);
   }
 
-  // Start.
+  // Start. A page that comes back (a reload) into a shift under way goes straight to it: no title town built for nothing.
   const to = params.get('autoplay-to');
-  if (autoplay && params.get('scramble') === '1') {
-    audio.unlock();
-    toYard();
-    const tryReady = () => {
-      if (S.net && S.net.room) {
-        try {
-          S.net.room.setReady(true);
-          if (S.net.room.isHost && S.net.room.canStart) S.net.room.startMatch();
-        } catch {
-          /* not yet */
+  const begin = () => {
+    if (autoplay && params.get('scramble') === '1') {
+      audio.unlock();
+      toYard();
+      const tryReady = () => {
+        if (S.net && S.net.room) {
+          try {
+            S.net.room.setReady(true);
+            if (S.net.room.isHost && S.net.room.canStart) S.net.room.startMatch();
+          } catch {
+            /* not yet */
+          }
         }
+        if (S.mode === 'yard') setTimeout(tryReady, 500);
+      };
+      setTimeout(tryReady, 800);
+    } else if (autoplay) {
+      const id = Number(params.get('town')) || 1;
+      startSolo(TOWNS.find((t) => t.id === id) || TOWNS[0]);
+    } else if (to === 'lobby') toYard();
+    else {
+      const m = S.net && S.net.match;
+      if (m && S.net.playing() && (m.phase === 'round' || m.phase === 'roundEnd' || m.phase === 'results')) toScramble();
+      else {
+        if (!production && params.get('title') === '1') audio.unlock(); // footage of the title with its music
+        toTitle();
       }
-      if (S.mode === 'yard') setTimeout(tryReady, 500);
-    };
-    setTimeout(tryReady, 800);
-  } else if (autoplay) {
-    const id = Number(params.get('town')) || 1;
-    startSolo(TOWNS.find((t) => t.id === id) || TOWNS[0]);
-  } else if (to === 'lobby') toYard();
-  else {
-    if (!production && params.get('title') === '1') audio.unlock(); // footage of the title with its music
-    toTitle();
-  }
-  requestAnimationFrame(frame);
+    }
+    last = performance.now();
+    requestAnimationFrame(frame);
+  };
+  begin();
 }
 
 function defaultProfile() {
@@ -1928,7 +2030,7 @@ function defaultProfile() {
     daily: null,
     // The career (see career.js).
     xp: 0,
-    garage: { paint: 'courier', topper: 'none', trail: 'none' },
+    garage: { paint: 'courier', topper: 'none', trail: 'none', wrap: 'kraft' },
     seen: 0, // how many garage items were unlocked when the garage was last opened
     medals: {},
     jobs: null,

@@ -22,6 +22,15 @@ export function createRenderer(hud, opts = {}) {
   hud.parentNode.insertBefore(gl, hud);
   const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: true, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: !!opts.preserve });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // No GPU (a blocklisted one, a VM): Chrome draws in software. The game then starts at its lowest quality.
+  let software = false;
+  try {
+    const c = renderer.getContext();
+    const info = c.getExtension('WEBGL_debug_renderer_info');
+    software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(String(info ? c.getParameter(info.UNMASKED_RENDERER_WEBGL) : c.getParameter(c.RENDERER)));
+  } catch {
+    /* unknown: assume a GPU */
+  }
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.NoToneMapping;
@@ -63,6 +72,7 @@ export function createRenderer(hud, opts = {}) {
     town: null, // the built town (see makeTown)
     style: null,
     quality: 'high',
+    software,
     chunks: { clear: () => signAtlas().redraw() },
     layers: [], // { setCity(town), frame(view, ctx) } from the other modules
     mats,
@@ -84,6 +94,49 @@ export function createRenderer(hud, opts = {}) {
     camera.aspect = R.w / R.h;
     camera.updateProjectionMatrix();
   };
+
+  // ---------------------------------------------------------------- shader warm-up
+  // A shader program is built (compiled and linked) the first time something draws with it, and a frame builds every new one it
+  // meets. With a GPU each takes milliseconds. Without one (SwiftShader, llvmpipe) each takes a second or more, so a first frame
+  // with twenty holds the page for half a minute: no input, no word to the platform. So each frame first builds what the scene
+  // will need, one program after another to the end (its link read back) within a few milliseconds, and isn't drawn until all
+  // are built: the page gets its turn between programs.
+  const built = new Set();
+  const variant = (o, m) => {
+    const g = o.geometry;
+    const a = g ? g.attributes : {};
+    return `${m.id}.${m.version}.${o.isInstancedMesh ? (o.instanceColor ? 'I' : 'i') : ''}${o.isSkinnedMesh ? 's' : ''}${o.isPoints ? 'p' : ''}${o.isLine ? 'l' : ''}${o.isSprite ? 'S' : ''}${a.normal ? 'n' : ''}${a.color ? a.color.itemSize : ''}${g && g.morphAttributes.position ? 'm' : ''}`;
+  };
+  const cold = [];
+  /** Builds what isn't built yet for this state (low: to the screen, else into the post chain). True while some are left. */
+  function warm(low) {
+    const state = low ? 'L' : 'P';
+    cold.length = 0;
+    scene.traverse((o) => {
+      if (cold.length >= 64 || !(o.isMesh || o.isPoints || o.isLine || o.isSprite) || !o.material) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (built.has(state + variant(o, m))) continue;
+        cold.push(o);
+        return;
+      }
+    });
+    const end = performance.now() + 8;
+    if (!low) while (post.warmOne(built)) if (performance.now() > end) return true;
+    if (!cold.length) return false;
+    renderer.setRenderTarget(low ? null : post.targets.scene);
+    for (let i = 0; i < cold.length; i++) {
+      const o = cold[i];
+      for (const m of renderer.compile(o, camera, scene)) {
+        const program = renderer.properties.get(m).currentProgram;
+        if (program) program.getUniforms(); // waits for the link
+      }
+      o.traverse((c) => {
+        if (c.material) for (const m of Array.isArray(c.material) ? c.material : [c.material]) built.add(state + variant(c, m));
+      });
+      if (performance.now() > end) return i < cold.length - 1 || cold.length === 64;
+    }
+    return cold.length === 64;
+  }
 
   // ---------------------------------------------------------------- towns
 
@@ -188,7 +241,8 @@ export function createRenderer(hud, opts = {}) {
       dyn.doorByHouse = new Map(doors.filter((d) => d.house >= 0).map((d) => [d.house, d]));
     }
     for (const br of data.bridges) dyn.bridges.push(makeDrawbridge(br, city, group));
-    return { city, style, data, group, dyn, env: envFor(city, style) };
+    // No GPU: no reflections of the sky (its programs and passes cost seconds there).
+    return { city, style, data, group, dyn, env: software ? null : envFor(city, style) };
   }
 
   function setDoor(im, d) {
@@ -559,19 +613,17 @@ export function createRenderer(hud, opts = {}) {
     pf.uFocus.value = view.focusY ?? 0.5;
     pf.uTilt.value = view.tilt ?? 1;
     pf.uBand.value = view.band ?? 0.17;
-    if (R.quality === 'low') {
-      renderer.shadowMap.enabled = false;
-      renderer.toneMapping = THREE.NeutralToneMapping;
-      renderer.toneMappingExposure = st.exposure;
-      renderer.setRenderTarget(null);
-      renderer.render(scene, camera);
-    } else {
-      renderer.shadowMap.enabled = true;
-      renderer.toneMapping = THREE.NoToneMapping;
-      const pw = Math.round(R.w * R.pr);
-      const ph = Math.round(R.h * R.pr);
-      post.resize(pw, ph, R.quality === 'high' ? 4 : 0);
-      post.render(scene, camera, { threshold: st.night > 0.5 ? 0.85 : 1.6, blurRadius: 1.4 });
+    const low = R.quality === 'low';
+    renderer.shadowMap.enabled = !low;
+    renderer.toneMapping = low ? THREE.NeutralToneMapping : THREE.NoToneMapping;
+    renderer.toneMappingExposure = low ? st.exposure : 1;
+    if (!low) post.resize(Math.round(R.w * R.pr), Math.round(R.h * R.pr), R.quality === 'high' ? 4 : 0);
+    // While programs are still being built the frame isn't drawn: the last one stays up.
+    if (!warm(low)) {
+      if (low) {
+        renderer.setRenderTarget(null);
+        renderer.render(scene, camera);
+      } else post.render(scene, camera, { threshold: st.night > 0.5 ? 0.85 : 1.6, blurRadius: 1.4 });
     }
     // World-anchored 2D: name tags and rising numbers.
     ctx.setTransform(R.pr, 0, 0, R.pr, 0, 0);

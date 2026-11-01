@@ -1,16 +1,16 @@
-// The room: joining, the Shift Scramble match (createMatch), deliveries as host claims, the bots the host drives, and every
-// van's presence. Each page simulates its own van against the shared traffic clock (match.elapsed); only deliveries are
-// decided by the host.
+// The room: joining, the Shift Scramble match (createMatch), deliveries and grabbed parcels as host claims, knock-offs as a
+// host call, the bots the host drives, and every van's presence. Each page simulates its own van against the shared
+// traffic clock (match.elapsed); only deliveries and loose parcels are decided by the host.
 
-import { DT, DELIVERY, SCRAMBLE, BOTS, VAN_BODIES, DX, DY, clamp } from './config.js';
+import { DT, DELIVERY, SCRAMBLE, KNOCK, BOTS, VAN_BODIES, DX, DY, clamp } from './config.js';
 import { TOWNS } from './towns.js';
 import { bridgeState, closedTiles } from './city.js';
 import { createTraffic } from './traffic.js';
 import { cityFor } from './world.js';
 import { createDriver, houseTarget, depotTarget, graphFor } from './driver.js';
 import { trapHouses } from './shift.js';
-import { newScramble, fillAddresses, checkClaim, applyDrop, openLastCall, createRunner, stepRunner, openList, scrambleTargets, scrambleClosure, ADDR_ID } from './scramble.js';
-import { TOPPERS } from './career.js';
+import { newScramble, fillAddresses, checkClaim, applyDrop, openLastCall, createRunner, stepRunner, openList, scrambleTargets, scrambleClosure, ADDR_ID, knockedBy, addLoose, expireLoose, checkGrab, applyGrab, grabsFor } from './scramble.js';
+import { TOPPERS, WRAPS } from './career.js';
 
 export const SETTINGS = [
   { id: 'towns', label: 'Towns', options: [{ value: 'mixed', label: 'Mixed' }, { value: 'easy', label: 'Easy' }, { value: 'hard', label: 'Hard' }], default: 'mixed' },
@@ -22,7 +22,7 @@ export const SETTINGS = [
 export const shiftTime = (m) => Math.max(0, m.elapsed / 1000 - SCRAMBLE.intro);
 
 /** Join the room as the page loads, then load the helpers. Null when there's no platform. */
-export async function connect(ow, onJoin) {
+export async function connect(ow, onJoin, opts = {}) {
   if (!ow || !ow.rooms) return null;
   let room;
   try {
@@ -45,7 +45,7 @@ export async function connect(ow, onJoin) {
   } catch {
     helpers = null;
   }
-  return createNet(room, helpers);
+  return createNet(room, helpers, opts);
 }
 
 /** The town pool for a setting. */
@@ -82,12 +82,16 @@ export function cleanVan(p, city) {
     body: Number.isInteger(p.body) && p.body >= 0 && p.body < VAN_BODIES.length ? p.body : 0,
     s: num(p.s, 0, 2) ? p.s : 0,
     tp: topperOf(p.tp),
+    wr: wrapOf(p.wr),
   };
 }
 
 const TOPPER_IDS = new Set(TOPPERS.map((t) => t.id));
 /** A roof topper from presence: a known id or none. */
 export const topperOf = (tp) => (typeof tp === 'string' && TOPPER_IDS.has(tp) ? tp : 'none');
+const WRAP_IDS = new Set(WRAPS.map((t) => t.id));
+/** A parcel wrap from presence: a known id or brown paper. */
+export const wrapOf = (wr) => (typeof wr === 'string' && WRAP_IDS.has(wr) ? wr : 'kraft');
 
 export function createNet(room, helpers, opts = {}) {
   const t = helpers && helpers.t;
@@ -102,6 +106,7 @@ export function createNet(room, helpers, opts = {}) {
     events: [],
     myBody: 0,
     myTopper: 'none',
+    myWrap: 'kraft',
     lastData: null, // the last round's data, for the between-shift map
     trails: new Map(), // seat id → [[x, y], ...] this shift
     onDrop: null, // (result, pass) for my own claims
@@ -122,7 +127,7 @@ export function createNet(room, helpers, opts = {}) {
   net.botInfo = botInfo;
 
   const match = helpers.createMatch(room, {
-    rounds: SCRAMBLE.shifts,
+    rounds: opts.shifts || SCRAMBLE.shifts,
     roundSeconds: 'shift',
     roundEndSeconds: SCRAMBLE.roundEnd,
     resultsSeconds: SCRAMBLE.results,
@@ -136,6 +141,7 @@ export function createNet(room, helpers, opts = {}) {
       log: t.array(t.array(t.any(), 5), 12),
       bots: t.record(t.any(), 8),
       lastCall: t.boolean(),
+      loose: t.array(t.object({ id: t.string(12), x: t.int(0, 99999), y: t.int(0, 99999), at: t.int(0, 1e8) }), KNOCK.max),
     },
     startRound(m) {
       const pool = townPool(room.settings && room.settings.towns);
@@ -162,8 +168,14 @@ export function createNet(room, helpers, opts = {}) {
         openLastCall(w.city, graphFor(w.city, w.env.closed, `k${w.closureK}`), d, vans, rng.next, w.town.cones ? trapHouses(w.city) : null);
         m.setData(d);
       }
-      // Bots checkpoint every 2 s, so a new host can take them over.
-      const now = Date.now();
+      // Loose parcels nobody picked up go.
+      if (Array.isArray(data.loose) && data.loose.some((l) => m.elapsed - l.at >= KNOCK.life * 1000)) {
+        const d = copyData(data);
+        expireLoose(d, m.elapsed);
+        m.setData(d);
+      }
+      // Bots checkpoint every 2 s (this page's own clock), so a new host can take them over.
+      const now = performance.now();
       if (now - (net.lastCheckpoint || 0) > 2000 && w.bots.size) {
         net.lastCheckpoint = now;
         const bots = {};
@@ -222,6 +234,79 @@ export function createNet(room, helpers, opts = {}) {
   function giveBack(id) {
     const b = net.world && net.world.bots.get(id);
     if (b) b.p = Math.min(DELIVERY.perLoad, b.p + 1);
+  }
+
+  /** Where a seat's van is, as the host knows it: { playing, parcels, x, y }, or null. */
+  function vanOf(seat) {
+    const m = match;
+    const w = net.world;
+    if (!w) return null;
+    if (seat.bot) {
+      const b = w.bots.get(seat.id);
+      return b ? { playing: true, parcels: b.p, x: b.van.x, y: b.van.y } : null;
+    }
+    if (seat.me && net.playing()) return { playing: true, parcels: w.me.p, x: w.me.van.x, y: w.me.van.y };
+    const p = room.players.get(seat.id);
+    const v = p && p.presence && p.presence.r === m.roundId ? cleanVan(p.presence, w.city) : null;
+    return v ? { playing: true, parcels: v.p, x: v.x, y: v.y } : null;
+  }
+
+  // Knock-offs: the van that was hit says so (its page drops the parcel from its roof); the host puts it in the road where
+  // the hit was, if that van and another were really there.
+  const knock = host.rpc('knock', {
+    args: { x: t.int(0, 99999), y: t.int(0, 99999) },
+    rate: 2,
+    validate(from, a) {
+      const m = match;
+      const w = net.world;
+      if (!w || m.phase !== 'round' || m.paused || !m.data || w.key !== m.roundId || shiftTime(m) <= 0) return 'not now';
+      const seat = m.seats.find((s) => s.id === from.id && !s.left);
+      const who = seat ? vanOf(seat) : null;
+      if (!who) return 'not seated';
+      const near = (v) => Math.hypot(v.x - a.x, v.y - a.y);
+      if (near(who) > 160) return 'far';
+      // Someone else was there to hit it.
+      const others = allVans().filter((v) => v.id !== from.id);
+      if (!others.some((v) => near(v) < 160)) return 'nobody';
+      return true;
+    },
+    run(from, a) {
+      const m = match;
+      if (!m.data) return;
+      const d = copyData(m.data);
+      addLoose(d, a.x, a.y, m.elapsed);
+      m.setData(d);
+    },
+  });
+
+  // Picking one up: the first van over it gets it.
+  const grab = host.claim('grab', {
+    args: { l: t.string(12) },
+    key: (a) => a.l,
+    rate: 4,
+    validate(c) {
+      const m = match;
+      const w = net.world;
+      if (!w || m.phase !== 'round' || m.paused || !m.data || w.key !== m.roundId) return 'not now';
+      const seat = m.seats.find((s) => s.id === c.from.id && !s.left);
+      if (!seat) return 'not seated';
+      const why = checkGrab(m.data, c.args.l, vanOf(seat), m.elapsed);
+      if (why && seat.bot) takeBack(seat.id);
+      return why ? why : true;
+    },
+    apply(winner, rivals) {
+      const m = match;
+      for (const r of rivals || []) if (String(r.from.id).startsWith('bot:')) takeBack(r.from.id);
+      if (!m.data) return;
+      const d = copyData(m.data);
+      if (applyGrab(d, winner.args.l)) m.setData(d);
+    },
+  });
+
+  /** A bot's grab lost or was refused: the parcel it reached for isn't on its roof after all. */
+  function takeBack(id) {
+    const b = net.world && net.world.bots.get(id);
+    if (b) b.p = Math.max(0, b.p - 1);
   }
 
   // ------------------------------------------------------------ the page's own simulation
@@ -313,7 +398,10 @@ export function createNet(room, helpers, opts = {}) {
     const open = openList(w.city, m.data);
     const others = net.others();
     let steps = 0;
-    while (w.t + DT <= target && steps < 90) {
+    // A slow machine (or a new host taking on the bots) never spends more than 40 ms a frame here: it falls behind
+    // instead, and the catch-up above jumps it back to the shared clock.
+    const budget = performance.now() + 40;
+    while (w.t + DT <= target && steps < 90 && (steps < 2 || performance.now() < budget)) {
       steps++;
       const tt = w.t + DT;
       envAt(w, tt);
@@ -323,6 +411,16 @@ export function createNet(room, helpers, opts = {}) {
         const ev = [];
         const passes = stepRunner(w.me, hold, w.city, w.env, open, ev);
         for (const e of ev) out.push(e);
+        knocksAndGrabs(w.me, ev, others, (x, y) => knock({ x: Math.round(x), y: Math.round(y) }), (l) => {
+          out.push({ type: 'grab', l });
+          Promise.resolve(grab({ l }))
+            .then((res) => {
+              if (res === 'won') return;
+              w.me.p = Math.max(0, w.me.p - 1);
+              if (net.onGrabLost) net.onGrabLost(res);
+            })
+            .catch(() => {});
+        }, out);
         for (const p of passes) {
           out.push({ type: 'pass', pass: p });
           Promise.resolve(drop({ a: p.addr, m: !!p.mat }))
@@ -339,10 +437,15 @@ export function createNet(room, helpers, opts = {}) {
           const ctx = { city: w.city, graph, targets: scrambleTargets(w.city, m.data, b, houseTarget, depotTarget), env: w.env };
           const bh = b.driver.drive(b.van, ctx, DT);
           b.hold = bh;
-          for (const p of stepRunner(b, bh, w.city, w.env, open)) {
+          const bev = [];
+          const caller = { id, name: (m.seats.find((s) => s.id === id) || {}).name || id };
+          for (const p of stepRunner(b, bh, w.city, w.env, open, bev)) {
             // callAs is false when the claim never went in (no longer host): the parcel stays on the roof.
-            if (!host.callAs({ id, name: (m.seats.find((s) => s.id === id) || {}).name || id }, 'drop', { a: p.addr, m: !!p.mat })) giveBack(id);
+            if (!host.callAs(caller, 'drop', { a: p.addr, m: !!p.mat })) giveBack(id);
           }
+          knocksAndGrabs(b, bev, w.env.vans, (x, y) => host.callAs(caller, 'knock', { x: Math.round(x), y: Math.round(y) }), (l) => {
+            if (!host.callAs(caller, 'grab', { l })) takeBack(id);
+          }, null);
         }
       }
       w.t = tt;
@@ -359,6 +462,29 @@ export function createNet(room, helpers, opts = {}) {
     }
     return out;
   };
+
+  /**
+   * After a runner's step: a hard hit from another van knocks a parcel off its roof (sent with `sendKnock`), and loose
+   * parcels it drives over are reached for (`sendGrab`, the parcel on the roof at once). Events go to `out` (my van only).
+   */
+  function knocksAndGrabs(r, events, vans, sendKnock, sendGrab, out) {
+    const m = match;
+    if (r.knockT > 0) r.knockT -= DT;
+    for (const e of events) {
+      if (e.type !== 'bump') continue;
+      const other = vans.find((v) => v.id === e.other);
+      if (!other || !knockedBy(r, other, net.world && net.world.city)) continue;
+      r.p--;
+      r.knockT = KNOCK.cooldown;
+      sendKnock(r.van.x, r.van.y);
+      if (out) out.push({ type: 'knocked', x: r.van.x, y: r.van.y, by: other.id });
+      break;
+    }
+    for (const l of grabsFor(r, m.data && m.data.loose, m.elapsed)) {
+      r.p = Math.min(DELIVERY.perLoad, r.p + 1);
+      sendGrab(l);
+    }
+  }
 
   /** Traffic and the town's moving parts at shift time tt. */
   function envAt(w, tt) {
@@ -420,7 +546,7 @@ export function createNet(room, helpers, opts = {}) {
   net.publish = (state) => {
     const w = net.world;
     const m = match;
-    const p = { st: state, body: net.myBody, tp: net.myTopper };
+    const p = { st: state, body: net.myBody, tp: net.myTopper, wr: net.myWrap };
     if (w && (state === 'play' || state === 'watch')) {
       const v = w.me.van;
       p.r = m.roundId;
