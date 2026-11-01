@@ -1,0 +1,32 @@
+{
+  "slug": "right-turns-only",
+  "name": "Right Turns Only",
+  "description": "Your delivery van only turns right. Deliver everything anyway.",
+  "dir": "game",
+  "productionBranch": "main",
+  "genre": "Racing",
+  "icon": "store/icon.png",
+  "thumbnails": ["store/thumb-1.png", "store/thumb-2.png", "store/thumb-3.png", "store/thumb-4.png"],
+  "controls": [
+    { "keys": ["Space", "Right", "D"], "action": "Hold to turn right" },
+    { "keys": ["Hold"], "action": "Turn right (touch)" },
+    { "keys": ["P", "Esc"], "action": "Pause" },
+    { "keys": ["R"], "action": "Restart the shift" },
+    { "keys": ["Enter"], "action": "Next town" },
+    { "keys": ["Tap"], "action": "Watch the next van" }
+  ],
+  "data": {
+    "daily": { "type": "list", "max": 100, "bytes": 64 }
+  },
+  "badges": [
+    { "id": "first-drop", "name": "First Drop", "description": "Deliver your first parcel.", "icon": "store/badge-first-drop.png" },
+    { "id": "three-rights", "name": "Three Rights", "description": "Make a left out of three quick rights.", "icon": "store/badge-three-rights.png" },
+    { "id": "doormat", "name": "On the Mat", "description": "Land 10 parcels on the doormat.", "icon": "store/badge-doormat.png" },
+    { "id": "roundabout-regular", "name": "Round and Round", "description": "Go all the way round a roundabout.", "icon": "store/badge-roundabout-regular.png" },
+    { "id": "rush-hour", "name": "Rush Hour", "description": "Win a shift against two or more vans.", "icon": "store/badge-rush-hour.png" },
+    { "id": "twelve-towns", "name": "Twelve Towns", "description": "Finish every town on the route.", "icon": "store/badge-twelve-towns.png" },
+    { "id": "no-scratches", "name": "No Scratches", "description": "Finish 9 or more parcels without a crash.", "icon": "store/badge-no-scratches.png" },
+    { "id": "daily-driver", "name": "Daily Driver", "description": "Finish a daily shift.", "icon": "store/badge-daily-driver.png" },
+    { "id": "all-stars", "name": "All Stars", "description": "Three stars in every town.", "icon": "store/badge-all-stars.png" }
+  ]
+}
