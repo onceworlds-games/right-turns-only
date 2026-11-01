@@ -99,7 +99,11 @@ button:focus-visible { outline: 4px solid var(--yellow); outline-offset: 4px; }
 .stop .nm { font-size: 20px; font-weight: 800; line-height: 1.05; }
 .stop .st { font-size: 18px; color: var(--yellow); letter-spacing: 1px; }
 .stop { position: relative; }
-.stop .medal { position: absolute; top: 6px; right: 8px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; line-height: 1; color: #7A5410; background: radial-gradient(circle at 35% 30%, #FFF0B0, #FFC22E 55%, #C98A12); box-shadow: 0 0 0 2px var(--ink), 0 2px 0 2px rgba(0,0,0,0.35); }
+.stop .n { position: relative; }
+.stop .medal { position: absolute; right: -9px; bottom: -7px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; line-height: 1; color: #7A5410; background: radial-gradient(circle at 35% 30%, #FFF0B0, #FFC22E 55%, #C98A12); box-shadow: 0 0 0 2px var(--ink), 0 2px 0 2px rgba(0,0,0,0.35); }
+.stop > span:not(.n) { min-width: 0; }
+.stop .st .mini-stars { flex-wrap: wrap; }
+.stop .st .mini-stars > span { flex-basis: 100%; margin: 1px 0 0; font-size: 15px; color: var(--paint); }
 .stop.locked { opacity: 0.45; }
 .stop.locked .n { border-color: #777; }
 .stop.next { border-color: var(--yellow); }
@@ -202,7 +206,14 @@ button:focus-visible { outline: 4px solid var(--yellow); outline-offset: 4px; }
 .tabs { display: flex; gap: 6px; margin: 10px 0; }
 .tab { flex: 1; min-height: 44px; border-radius: 8px; background: rgba(244,241,232,0.08); font-size: 20px; font-weight: 900; color: var(--paint); border: 2px solid transparent; }
 .tab.on { background: var(--paint); color: var(--ink); }
-@media (max-width: 440px) { .tabs { gap: 4px; } .tab { font-size: 17px; } }
+@media (max-width: 440px) {
+  .tabs { gap: 4px; }
+  .tab { font-size: 17px; }
+  .stop { grid-template-columns: 38px 1fr; gap: 6px; padding: 6px 8px; }
+  .stop .n { width: 38px; height: 38px; font-size: 20px; border-width: 3px; }
+  .stop .nm { font-size: 17px; }
+  .stop .medal { width: 18px; height: 18px; font-size: 10px; right: -5px; bottom: -5px; }
+}
 .items { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; max-height: 34vh; overflow: auto; }
 .item { display: grid; grid-template-rows: auto auto auto; justify-items: center; gap: 2px; padding: 8px 6px; border-radius: 10px; background: rgba(244,241,232,0.06); border: 2px solid rgba(244,241,232,0.2); color: var(--paint); min-height: 92px; }
 .item.on { border-color: var(--yellow); background: rgba(255,194,46,0.14); }

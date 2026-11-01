@@ -65,7 +65,9 @@ export function boot(joining, net) {
     scr: { lastSecond: -1, follow: null, lastCallAt: -1 },
     fontsReady: false,
     autoDriver: autoplay ? createDriver({ skill: 1, seed: 5 }) : null,
-  };  if (import.meta.env.DEV) globalThis.__rto = { R, people, S, fx };
+  };
+  // The dev server's handle for looking around (never in a build).
+  if (import.meta.env.DEV) globalThis.__rto = { R, people, S, fx, toTitle, toYard, toGarage, toRoute, toCard: (id) => toCard(TOWNS.find((t) => t.id === id)) };
 
 
   const totalStars = () => totalStarsOf(S.profile);

@@ -250,7 +250,7 @@ export function createUI(root, h) {
       if (!locked && d.medals && d.medals[town.id]) {
         const m = el('span', 'medal', '★');
         m.title = 'Challenge medal';
-        b.append(m);
+        n.append(m);
       }
       b.addEventListener('click', (e) => {
         e.stopPropagation();
