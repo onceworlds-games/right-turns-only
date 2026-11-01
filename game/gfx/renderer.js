@@ -20,17 +20,20 @@ export function createRenderer(hud, opts = {}) {
   const gl = document.createElement('canvas');
   gl.id = 'gl';
   hud.parentNode.insertBefore(gl, hud);
-  const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: true, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: !!opts.preserve });
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  // No GPU (a blocklisted one, a VM): Chrome draws in software. The game then starts at its lowest quality.
+  // No GPU (a blocklisted one, a VM): Chrome draws in software. The game then starts at its lowest quality, and without
+  // multisampling on the screen, which software pays for in every pixel. Asked of a throwaway context first.
   let software = false;
   try {
-    const c = renderer.getContext();
-    const info = c.getExtension('WEBGL_debug_renderer_info');
-    software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(String(info ? c.getParameter(info.UNMASKED_RENDERER_WEBGL) : c.getParameter(c.RENDERER)));
+    const c = document.createElement('canvas').getContext('webgl2');
+    const info = c && c.getExtension('WEBGL_debug_renderer_info');
+    if (c) software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(String(info ? c.getParameter(info.UNMASKED_RENDERER_WEBGL) : c.getParameter(c.RENDERER)));
+    const lose = c && c.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();
   } catch {
     /* unknown: assume a GPU */
   }
+  const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: !software || !!opts.full, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: !!opts.preserve });
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.NoToneMapping;
@@ -108,15 +111,22 @@ export function createRenderer(hud, opts = {}) {
     return `${m.id}.${m.version}.${o.isInstancedMesh ? (o.instanceColor ? 'I' : 'i') : ''}${o.isSkinnedMesh ? 's' : ''}${o.isPoints ? 'p' : ''}${o.isLine ? 'l' : ''}${o.isSprite ? 'S' : ''}${a.normal ? 'n' : ''}${a.color ? a.color.itemSize : ''}${g && g.morphAttributes.position ? 'm' : ''}`;
   };
   const cold = [];
+  // What each object was last found ready with (one material, its version, the state, instance colours): no key to build
+  // for it again until one of those changes.
+  const ready = new WeakMap();
   function findCold(state) {
     cold.length = 0;
     scene.traverse((o) => {
       if (cold.length >= 64 || !(o.isMesh || o.isPoints || o.isLine || o.isSprite) || !o.material) return;
-      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      const one = !Array.isArray(o.material);
+      const was = one ? ready.get(o) : null;
+      if (was && was.m === o.material && was.v === o.material.version && was.s === state && was.c === !!o.instanceColor && was.g === o.geometry) return;
+      for (const m of one ? [o.material] : o.material) {
         if (built.has(state + variant(o, m))) continue;
         cold.push(o);
         return;
       }
+      if (one) ready.set(o, { m: o.material, v: o.material.version, s: state, c: !!o.instanceColor, g: o.geometry });
     });
   }
   let warmFor = 'L';
