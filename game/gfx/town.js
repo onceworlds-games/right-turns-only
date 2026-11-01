@@ -758,9 +758,32 @@ export function buildTown(city, style) {
       for (let i = 0; i < 2 + rng.int(2); i++) tree(c.main, c.leaves, cx + rng.float(-3.5, 3.5), cz + rng.float(-3.5, 3.5), rng.float(1.6, 2.3), style, rng, { y: LAWN + 0.8 });
       return;
     }
-    // A thick hedge with trees growing out of it.
+    // A thick hedge with trees growing out of it: a dense body under a soft clipped top, clumps all round its rim (they
+    // round off the slab's edges) and a few more over it.
     const hc = p.hedge;
-    c.leaves.box((ix0 + ix1) / 2, LAWN, (iz0 + iz1) / 2, ix1 - ix0, south ? 1.4 : 2.2, iz1 - iz0, hc, { top: shade(hc, 0.14), bottomDark: 0.3 });
+    const body = (south ? 1.4 : 2.2) - 0.35;
+    c.leaves.box((ix0 + ix1) / 2, LAWN, (iz0 + iz1) / 2, ix1 - ix0, body, iz1 - iz0, shade(hc, -0.05), { top: shade(hc, 0.02), bottomDark: 0.3 });
+    const top = LAWN + body;
+    const lumps = (x0, z0, x1, z1, big) => {
+      const n = Math.max(1, Math.round(Math.hypot(x1 - x0, z1 - z0) / 1.6));
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const x = x0 + (x1 - x0) * t;
+        const z = z0 + (z1 - z0) * t;
+        const k = rng.float(0, 1);
+        c.leaves.blob(x, top - 0.1, z, (big ? 1.0 : 0.85) + k * 0.3, shade(hc, k * 0.1 - 0.05), 0.62, 0, 0.22, x * 3.1 + z * 1.7, shade(hc, 0.16));
+      }
+    };
+    const inset = 0.5;
+    lumps(ix0 + inset, iz0 + inset, ix1 - inset, iz0 + inset, roadSide[0]);
+    lumps(ix0 + inset, iz1 - inset, ix1 - inset, iz1 - inset, roadSide[2]);
+    lumps(ix0 + inset, iz0 + inset, ix0 + inset, iz1 - inset, roadSide[3]);
+    lumps(ix1 - inset, iz0 + inset, ix1 - inset, iz1 - inset, roadSide[1]);
+    for (let i = 0; i < 8; i++) {
+      const x = cx + rng.float(-3.6, 3.6);
+      const z = cz + rng.float(-3.6, 3.6);
+      c.leaves.blob(x, top - 0.05, z, rng.float(1.1, 1.8), shade(hc, rng.float(-0.06, 0.06)), 0.5, 0, 0.22, x * 1.3 + z * 2.9, shade(hc, 0.16));
+    }
     for (let i = 0; i < 2 + rng.int(2); i++) {
       if (south && rng.chance(0.6)) continue;
       tree(c.main, c.leaves, cx + rng.float(-3.5, 3.5), cz + rng.float(-3.5, 3.5), rng.float(1.8, 2.6), style, rng, { y: LAWN + (south ? 1.4 : 2.2) - 1.2 });
