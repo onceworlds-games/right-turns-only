@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { TOWNS } from '../game/towns.js';
 import { BOTS, SCRAMBLE, openAddresses } from '../game/config.js';
 import { cityFor, createScrambleWorld } from '../game/world.js';
-import { newScramble, fillAddresses, checkClaim, applyDrop, pointsFor, pickHouse, lastCallHouse } from '../game/scramble.js';
+import { newScramble, fillAddresses, checkClaim, applyDrop, pointsFor, pickHouse, lastCallHouse, podiumOrder } from '../game/scramble.js';
 import { graphFor } from '../game/driver.js';
 import { createRng } from '../game/rng.js';
 
@@ -217,4 +217,20 @@ test('bots go for loose parcels on the road near them, worth more with an empty 
   assert.equal(looseTargets(city, data, r).length, 1);
   r.van.x = road.x - 60;
   assert.equal(looseTargets(city, data, r).length, 0, 'went by without it');
+});
+
+test('the podium: three vans on the plinths in place order even with ties, the rest behind', () => {
+  const row = (name, place) => ({ name, place });
+  // Tied for first: both winners up, the next van on the third plinth, nobody's plinth left empty.
+  let o = podiumOrder([row('Rosa', 1), row('Mo', 3), row('You', 1), row('Dex', 4), row('Juno', 5), row('Vik', 5)]);
+  assert.deepEqual(o.plinths.map((r) => r.name), ['Rosa', 'You', 'Mo']);
+  assert.deepEqual(o.rest.map((r) => r.name), ['Dex', 'Juno', 'Vik']);
+  // Plain order, given out of order.
+  o = podiumOrder([row('C', 3), row('A', 1), row('D', 4), row('B', 2)]);
+  assert.deepEqual(o.plinths.map((r) => r.name), ['A', 'B', 'C']);
+  assert.deepEqual(o.rest.map((r) => r.name), ['D']);
+  // Two players: the third plinth stands empty.
+  o = podiumOrder([row('B', 2), row('A', 1)]);
+  assert.deepEqual(o.plinths.map((r) => r && r.name), ['A', 'B', null]);
+  assert.equal(o.rest.length, 0);
 });

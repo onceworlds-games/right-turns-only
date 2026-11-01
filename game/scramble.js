@@ -292,3 +292,16 @@ export function scrambleTargets(city, data, r, houseTarget, depotTarget) {
     .map((o) => houseTarget(city, o.house, o.addr, o.gold ? SCRAMBLE.goldPoints : 1))
     .concat(loose);
 }
+
+/**
+ * Who stands where on the podium: the standings in place order, the first three on the plinths (centre, left, right) and
+ * the rest behind. A tie keeps its shared place, so two vans tied for first both stand on the podium (the plinth shows
+ * the place it was given); no plinth is left empty while someone is behind it.
+ */
+export function podiumOrder(rows) {
+  const sorted = rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (a.r.place || 99) - (b.r.place || 99) || a.i - b.i)
+    .map((x) => x.r);
+  return { plinths: [0, 1, 2].map((i) => sorted[i] || null), rest: sorted.slice(3) };
+}

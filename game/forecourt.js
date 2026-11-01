@@ -4,6 +4,7 @@
 import { T, SEATS } from './config.js';
 import { TITLE_TOWN } from './towns.js';
 import { cityFor } from './world.js';
+import { podiumOrder } from './scramble.js';
 import { font, symbol } from './draw2d.js';
 import { outlined } from './hud.js';
 
@@ -197,22 +198,27 @@ export function createForecourt() {
     const cam = fit(scr, FORE.x, FORE.y - 22, portrait ? 205 : 320, portrait ? 210 : 190, ui, pitch, 3.2);
     const dx = portrait ? 66 : 78;
     const pw = portrait ? 58 : 64;
-    const PL = { 1: { dx: 0, hgt: 1.7, color: '#FFC22E' }, 2: { dx: -dx, hgt: 1.1, color: '#DCE2EA' }, 3: { dx, hgt: 0.65, color: '#D99A5B' } };
+    // Plinths by order (centre, left, right), each as tall and coloured as the place of the van on it: a tie for first
+    // puts two winners up, spinning.
+    const PL = { 1: { hgt: 1.7, color: '#FFC22E' }, 2: { hgt: 1.1, color: '#DCE2EA' }, 3: { hgt: 0.65, color: '#D99A5B' } };
+    const SLOT = [0, -dx, dx];
     const vans = [];
     const plinths = [];
     const tags = [];
-    const rest = rows.filter((r) => !PL[r.place]);
-    for (const p of [1, 2, 3]) {
+    const order = podiumOrder(rows);
+    const rest = order.rest;
+    order.plinths.forEach((r, i) => {
+      const p = r ? Math.max(1, Math.min(3, r.place | 0 || i + 1)) : i + 1;
       const d = PL[p];
-      const x = FORE.x + d.dx;
+      const x = FORE.x + SLOT[i];
       const y = FORE.y + 6;
-      plinths.push({ x, y, w: pw, d: 58, hgt: d.hgt, color: d.color, place: p });
-      const r = rows.find((q) => q.place === p);
-      if (!r) continue;
-      const h = p === 1 ? PARK_H + t * 1.6 : PARK_H + (p === 2 ? 0.3 : -0.3);
-      vans.push({ x, y, z: d.hgt, h, v: p === 1 ? 160 : 0, hold: p === 1, color: r.color, body: BODY_IDS[r.body] || 'box', topper: r.topper || 'none', wrap: r.wrap, parcels: 3, me: r.me });
+      plinths.push({ x, y, w: pw, d: 58, hgt: d.hgt, color: d.color, place: r ? r.place || p : p });
+      if (!r) return;
+      const win = p === 1;
+      const h = win ? PARK_H + t * 1.6 * (i === 0 ? 1 : -1) : PARK_H + (i === 1 ? 0.3 : -0.3);
+      vans.push({ x, y, z: d.hgt, h, v: win ? 160 : 0, hold: win, color: r.color, body: BODY_IDS[r.body] || 'box', topper: r.topper || 'none', wrap: r.wrap, parcels: 3, me: r.me });
       tags.push({ r, x, y, hgt: d.hgt + 3.8 });
-    }
+    });
     rest.forEach((r, i) => {
       const x = FORE.x + (i - (rest.length - 1) / 2) * (portrait ? 58 : 70);
       const y = FORE.y - 62;
