@@ -1,7 +1,7 @@
 {
   "slug": "right-turns-only",
   "name": "Right Turns Only",
-  "description": "Your delivery van only turns right. Deliver everything anyway.",
+  "description": "Your delivery van only turns right. Deliver everything anyway: one button, twelve towns, a career of tips, ranks and van looks, and six-van scrambles where a hard hit knocks parcels off a rival's roof.",
   "dir": "dist",
   "productionBranch": "main",
   "genre": "Racing",
@@ -132,6 +132,11 @@
       "name": "Senior Courier",
       "description": "Reach rank 10.",
       "icon": "store/badge-senior-courier.png"
+    },
+    {
+      "id": "finders-keepers",
+      "name": "Finders Keepers",
+      "description": "Grab a parcel knocked off another van in a scramble."
     }
   ]
 }
