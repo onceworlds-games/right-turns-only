@@ -189,3 +189,32 @@ test('knock-offs in a shift: parcels stay 0-3, every grabbed parcel had been kno
   }
   assert.ok(grabs <= knocks);
 });
+
+test('bots go for loose parcels on the road near them, worth more with an empty roof, and give up on one they drove past', async () => {
+  const { looseTargets } = await import('../game/scramble.js');
+  const { KNOCK, T } = await import('../game/config.js');
+  const { tileDrivable } = await import('../game/city.js');
+  const city = cityFor(TOWNS[0]);
+  // A road tile and a lot (not road) in Maple Row.
+  let road = null;
+  let lot = null;
+  for (let ty = 1; ty < city.h - 1 && !(road && lot); ty++) {
+    for (let tx = 1; tx < city.w - 1; tx++) {
+      if (!road && tileDrivable(city, tx, ty) && tileDrivable(city, tx + 1, ty)) road = { x: (tx + 0.5) * T, y: (ty + 0.5) * T };
+      if (!lot && !tileDrivable(city, tx, ty)) lot = { x: (tx + 0.5) * T, y: (ty + 0.5) * T };
+    }
+  }
+  const data = { loose: [{ id: 'l1', x: road.x, y: road.y, at: 0 }, { id: 'l2', x: lot.x, y: lot.y, at: 0 }] };
+  const bot = (x, y, p) => ({ van: { x, y }, p });
+  const empty = looseTargets(city, data, bot(road.x + 200, road.y, 0));
+  assert.deepEqual(empty.map((t) => t.key), ['l1'], 'only the one on the road');
+  assert.ok(empty[0].value > 1, 'an empty roof wants it more');
+  assert.ok(looseTargets(city, data, bot(road.x + 200, road.y, 1))[0].value < 1);
+  assert.equal(looseTargets(city, data, bot(road.x + 200, road.y, 3)).length, 0, 'a full roof leaves it');
+  assert.equal(looseTargets(city, data, bot(road.x + KNOCK.chase + 50, road.y, 0)).length, 0, 'too far to chase');
+  // Driving past: close, then further away.
+  const r = bot(road.x + 40, road.y, 1);
+  assert.equal(looseTargets(city, data, r).length, 1);
+  r.van.x = road.x - 60;
+  assert.equal(looseTargets(city, data, r).length, 0, 'went by without it');
+});
