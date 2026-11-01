@@ -161,6 +161,14 @@ export function createShift(city, opts = {}) {
     lapZone: null,
     lastHold: false,
     holdStart: 0,
+    laps: 0,
+    threeRights: 0,
+    // The express parcel (from the third town, not in the daily): one gold parcel on a timer, worth big tips. It is off
+    // the shift's list: going for it costs clock time.
+    express: null, // { house, until }
+    expressDone: 0,
+    expressOffered: false,
+    expressOn: opts.express !== undefined ? !!opts.express : opts.daily === undefined && city.town.id >= 3,
   };
   s.closed = closedTiles(city, s.closureK);
 
@@ -181,7 +189,14 @@ export function createShift(city, opts = {}) {
       s.turns.length = 0;
     }
     // Deliveries.
-    for (const p of tracker.step(van, s.lit)) {
+    const targets = s.express ? s.lit.concat([s.express.house]) : s.lit;
+    for (const p of tracker.step(van, targets)) {
+      if (s.express && p.house === s.express.house) {
+        s.express = null;
+        s.expressDone++;
+        events.push({ type: 'express', house: p.house, mat: p.mat, x: p.x, y: p.y, d: p.d, v: p.v });
+        continue;
+      }
       s.lit = s.lit.filter((h) => h !== p.house);
       s.delivered.push({ house: p.house, mat: p.mat, t: s.clock });
       if (p.mat) s.mats++;
@@ -193,6 +208,15 @@ export function createShift(city, opts = {}) {
       s.lit = s.lit.concat(add);
       s.reloads++;
       events.push({ type: 'load', houses: add });
+      // The express call comes in with the second load.
+      if (s.expressOn && !s.expressOffered && s.reloads === 1) {
+        s.expressOffered = true;
+        const house = expressHouse(city, houses, s.reloads);
+        if (house) {
+          s.express = { house, until: s.clock + EXPRESS.time };
+          events.push({ type: 'expressCall', house, until: s.express.until });
+        }
+      }
       if (city.town.cones) {
         s.closureK = closureSet(s.reloads);
         s.closed = closedTiles(city, s.closureK);
@@ -208,18 +232,25 @@ export function createShift(city, opts = {}) {
         while (s.turns.length > 3) s.turns.shift();
         if (s.turns.length === 3 && s.clock - s.turns[0][0] <= 6 && s.turns.reduce((a, b) => a + b[1], 0) >= 260 * DEG) {
           events.push({ type: 'feat', id: 'three-rights' });
+          s.threeRights++;
           s.turns.length = 0;
         }
       }
     }
     s.lastHold = van.hold;
+    if (s.express && s.clock > s.express.until) {
+      events.push({ type: 'expressGone', house: s.express.house });
+      s.express = null;
+    }
     if (van.zone && van.zone.kind === 'plaza') {
       if (s.lapZone !== van.zone) {
         s.lapZone = van.zone;
         s.lapTurn = van.turned;
       } else if (van.turned - s.lapTurn >= Math.PI * 2) {
+        // A full lap; keep going round for another.
         events.push({ type: 'feat', id: 'roundabout-regular' });
-        s.lapTurn = Infinity;
+        s.laps++;
+        s.lapTurn = van.turned;
       }
     } else s.lapZone = null;
     // Trail for the results map (2 Hz is plenty).
@@ -239,6 +270,17 @@ export function createShift(city, opts = {}) {
   /** What the van should head for: the lit houses, or the depot when empty. */
   s.needsDepot = () => !s.lit.length && s.queue.length > 0;
   return s;
+}
+
+export const EXPRESS = { time: 32 };
+
+/** The express parcel's house: an address off the shift's list (and off any roadworks trap), fixed per town. */
+export function expressHouse(city, houses, k = 1) {
+  const traps = trapHouses(city);
+  const pool = city.addresses.filter((h) => !houses.includes(h) && !traps.has(h.id));
+  if (!pool.length) return null;
+  const rng = createRng(hashString(`express:${city.town.id}:${k}`));
+  return pool[rng.int(pool.length)];
 }
 
 /**

@@ -124,12 +124,13 @@ void main() {
   vK = k;
   vec4 mv = viewMatrix * vec4(w, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = (0.25 + k * 1.1) * uPx / -mv.z;
+  gl_PointSize = (0.2 + k * 0.8) * uPx / -mv.z;
 }`,
     fragmentShader: `uniform vec3 uColor; varying float vK;
 void main() {
-  float d = length(gl_PointCoord - 0.5) * 2.0;
-  float ring = smoothstep(0.65, 0.85, d) * smoothstep(1.0, 0.88, d);
+  vec2 q = gl_PointCoord - 0.5;
+  float d = length(q * vec2(1.0, 1.9)) * 2.0;
+  float ring = smoothstep(0.6, 0.82, d) * smoothstep(1.0, 0.86, d);
   gl_FragColor = vec4(uColor, ring * (1.0 - vK) * 0.7);
 }`,
   });
@@ -143,7 +144,7 @@ export function createWeatherLayer(R) {
   rainU.uVel.value.set(3.5, -24, 2);
   const rain = new THREE.LineSegments(field(3200, 2), rainMaterial(rainU));
   const splashU = { ...common(), uColor: { value: new THREE.Color('#D8E6F2') } };
-  const splash = new THREE.Points(field(900), splashMaterial(splashU));
+  const splash = new THREE.Points(field(650), splashMaterial(splashU));
   const snowU = { ...common(), uColor: { value: new THREE.Color('#ffffff') }, uColor2: { value: new THREE.Color('#ffffff') }, uSize: { value: 0.22 } };
   snowU.uVel.value.set(1.2, -2.2, 0.4);
   const snow = new THREE.Points(field(2600), flakeMaterial(snowU, 'snow'));

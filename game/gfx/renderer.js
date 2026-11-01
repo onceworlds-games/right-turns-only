@@ -321,7 +321,7 @@ export function createRenderer(hud) {
     shared.uNight.value = st.night;
     shared.uWet.value = st.wet;
     shared.uSnow.value = st.snow;
-    shared.uLampPower.value = st.night * 1.7;
+    shared.uLampPower.value = st.night * 4.2;
     mats.signs.emissiveIntensity = 0.08 + st.night * (city.town.night ? 2.4 : 1.2);
     mats.water.color.set(city.town.palette.water);
     const g = post.final.uniforms;

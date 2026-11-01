@@ -126,6 +126,7 @@ export function stepVan(van, hold, city, env, events = null) {
   // Speed.
   let target = van.hold ? (zone ? DRIVE.loopSpeed * (city.snow ? 0.8 : 1) : DRIVE.turning) : city.snow ? DRIVE.iceStraight : DRIVE.straight;
   if (grass) target *= DRIVE.grass;
+  if (van.boost) target *= van.boost; // flow: a little more top speed for driving well (1 when not set)
   // Traffic ahead going the same way: the van tucks in behind it (it never rear-ends a car).
   const lead = carAhead(van, env);
   if (lead) target = Math.min(target, Math.max(0, lead.v * 0.96 - lead.close));

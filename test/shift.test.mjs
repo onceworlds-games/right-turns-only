@@ -113,3 +113,71 @@ test('the pass tracker forgets houses that go dark', () => {
   t.step({ x: 0, y: 10, v: 200 }, [h]);
   assert.deepEqual(t.step({ x: 0, y: 200, v: 200 }, []), []);
 });
+
+test('express parcel: from the third town a gold call comes in with the second load, on a timer, off the shift list', async () => {
+  const { createDriver } = await import('../game/driver.js');
+  const { DT } = await import('../game/config.js');
+  const { EXPRESS } = await import('../game/shift.js');
+  for (const id of [1, 3]) {
+    const town = TOWNS.find((t) => t.id === id);
+    const w = createSoloWorld(town);
+    const bot = createDriver({ skill: 1, seed: 3 });
+    w.shift.start();
+    const seen = [];
+    let done = null;
+    while (!done && w.t < 400) {
+      for (const e of w.step(bot.drive(w.van, w.botCtx(), DT))) {
+        if (e.type.startsWith('express')) seen.push(e);
+        if (e.type === 'done') done = e;
+      }
+    }
+    assert.ok(done, `town ${id} finishes`);
+    if (id < 3) assert.equal(seen.length, 0);
+    else {
+      const call = seen.find((e) => e.type === 'expressCall');
+      assert.ok(call, 'the call comes');
+      assert.ok(!w.shift.houses.includes(call.house), 'not one of the shift houses');
+      assert.ok(call.until > EXPRESS.time - 1);
+      // The bot ignores it, so it runs out (unless it happened to drive through it).
+      assert.ok(seen.some((e) => e.type === 'expressGone' || e.type === 'express'));
+    }
+  }
+});
+
+test('express parcel: driving through it delivers it (and can land on the mat)', () => {
+  const town = TOWNS.find((t) => t.id === 3);
+  const city = cityFor(town);
+  const shift = createShift(city);
+  shift.start();
+  const van = createVan(city.depot.x, city.depot.y, 0, 0);
+  // Empty the first load, then load at the depot.
+  shift.lit = [];
+  const ev = shift.step(van, 1 / 60);
+  const call = ev.find((e) => e.type === 'expressCall');
+  assert.ok(call);
+  const h = call.house;
+  const got = pass(shift, van, h.dropX - 120, h.dropY, h.dropX + 120, h.dropY, 150);
+  const ex = got.find((e) => e.type === 'express');
+  assert.ok(ex, 'delivered');
+  assert.equal(ex.mat, true);
+  assert.equal(shift.express, null);
+  assert.equal(shift.expressDone, 1);
+});
+
+test('laps: every full lap of a roundabout counts', () => {
+  const town = TOWNS.find((t) => t.id === 3);
+  const city = cityFor(town);
+  const shift = createShift(city);
+  shift.start();
+  const zone = city.loops.find((z) => z.kind === 'plaza');
+  assert.ok(zone);
+  const van = createVan(zone.x, zone.y - 40, 0, 120);
+  van.zone = zone;
+  let laps = 0;
+  for (let i = 0; i < 60 * 12; i++) {
+    van.turned += (Math.PI * 2 * 3.2) / (60 * 12);
+    for (const e of shift.step(van, 1 / 60)) if (e.type === 'feat' && e.id === 'roundabout-regular') laps++;
+  }
+  assert.equal(laps, 3);
+  assert.equal(shift.laps, 3);
+});

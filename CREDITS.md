@@ -28,4 +28,4 @@ All by **Quaternius** (quaternius.com), released under **CC0 1.0 (public domain)
 
 ## Font
 
-**Barlow Condensed** (700, 900) by Jeremy Tribby, SIL Open Font License 1.1 (`public/fonts/OFL-BarlowCondensed.txt`). https://fonts.google.com/specimen/Barlow+Condensed
+**Barlow Condensed** (700, 900) by The Barlow Project Authors, SIL Open Font License 1.1 (`public/fonts/OFL-BarlowCondensed.txt`). https://fonts.google.com/specimen/Barlow+Condensed
