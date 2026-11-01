@@ -1,0 +1,115 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { TOWNS } from '../game/towns.js';
+import { cityFor, createSoloWorld, estimateFor, parFor } from '../game/world.js';
+import { createShift, isMat, starsFor, minPlausible, createPassTracker } from '../game/shift.js';
+import { createVan } from '../game/physics.js';
+import { DELIVERY, STARS } from '../game/config.js';
+
+/** Move a van in a straight line through points, calling shift.step each 1/60 s. */
+function pass(shift, van, x0, y0, x1, y1, speed = 260) {
+  const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (speed / 60));
+  const ev = [];
+  for (let i = 0; i <= n; i++) {
+    van.x = x0 + ((x1 - x0) * i) / n;
+    van.y = y0 + ((y1 - y0) * i) / n;
+    van.v = speed;
+    for (const e of shift.step(van, 1 / 60)) ev.push(e);
+  }
+  return ev;
+}
+
+test('doormat: closest pass within 28 px at 210 px/s or less', () => {
+  assert.equal(isMat(28, 210), true);
+  assert.equal(isMat(28.5, 200), false);
+  assert.equal(isMat(10, 211), false);
+  assert.equal(isMat(0, 0), true);
+});
+
+test('a pass through a ring delivers at its closest point; outside it nothing', () => {
+  const city = cityFor(TOWNS[0]);
+  const shift = createShift(city);
+  shift.start();
+  const van = createVan(0, 0, 0, 260);
+  const h = shift.lit[0];
+  // Miss: 80 px off.
+  let ev = pass(shift, van, h.dropX - 300, h.dropY - 80, h.dropX + 300, h.dropY - 80);
+  assert.equal(ev.filter((e) => e.type === 'drop').length, 0);
+  ev = pass(shift, van, h.dropX - 300, h.dropY - 40, h.dropX + 300, h.dropY - 40);
+  const drops = ev.filter((e) => e.type === 'drop');
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0].mat, false);
+  assert.ok(Math.abs(drops[0].d - 40) < 3);
+  // A slow pass down the middle lands on the mat.
+  const h2 = shift.lit[0];
+  ev = pass(shift, van, h2.dropX - 300, h2.dropY + 5, h2.dropX + 300, h2.dropY + 5, 190);
+  assert.equal(ev.find((e) => e.type === 'drop').mat, true);
+  assert.equal(shift.mats, 1);
+});
+
+test('loading: three on the van, the depot tops it up, the last drop ends the shift with doormat seconds off', () => {
+  const town = TOWNS[0];
+  const city = cityFor(town);
+  const shift = createShift(city);
+  shift.start();
+  assert.equal(shift.lit.length, DELIVERY.perLoad);
+  assert.equal(shift.queue.length, town.parcels - DELIVERY.perLoad);
+  const van = createVan(0, 0, 0, 260);
+  let done = null;
+  let loads = 0;
+  for (let guard = 0; guard < 20 && !done; guard++) {
+    if (shift.needsDepot()) {
+      const d = city.depot;
+      for (const e of pass(shift, van, d.x - 100, d.y, d.x + 100, d.y)) if (e.type === 'load') loads++;
+      continue;
+    }
+    const h = shift.lit[0];
+    for (const e of pass(shift, van, h.dropX, h.dropY - 200, h.dropX, h.dropY + 200, 200)) if (e.type === 'done') done = e;
+  }
+  assert.ok(done, 'the shift ended');
+  assert.equal(loads, town.parcels / DELIVERY.perLoad - 1);
+  assert.equal(done.mats, town.parcels);
+  assert.ok(Math.abs(done.final - (done.time - town.parcels * DELIVERY.matBonus)) < 1e-9 || done.final === 0);
+});
+
+test('Coneyard: the cones move every reload', () => {
+  const city = cityFor(TOWNS.find((t) => t.cones));
+  const shift = createShift(city);
+  shift.start();
+  const k0 = shift.closureK;
+  shift.lit = [];
+  const van = createVan(city.depot.x - 100, city.depot.y, 0, 260);
+  const ev = pass(shift, van, city.depot.x - 100, city.depot.y, city.depot.x + 100, city.depot.y);
+  assert.ok(ev.some((e) => e.type === 'closures'));
+  assert.notEqual(shift.closureK, k0);
+  assert.ok(shift.closed.size > 0);
+});
+
+test('stars against par; the daily list floor is well under par', () => {
+  assert.equal(starsFor(50, 50), 3);
+  assert.equal(starsFor(50 * STARS.three + 0.01, 50), 2);
+  assert.equal(starsFor(50 * STARS.two + 0.01, 50), 1);
+  assert.equal(starsFor(Infinity, 50), 0);
+  for (const town of TOWNS) {
+    const floor = minPlausible(estimateFor(town), town.parcels);
+    assert.ok(floor > 5 && floor < parFor(town) * 0.6, `${town.name}: floor ${floor}`);
+  }
+});
+
+test('a solo world: crashes are counted, the clock only runs after GO', () => {
+  const w = createSoloWorld(TOWNS[1]);
+  for (let i = 0; i < 60; i++) w.step(false, false);
+  assert.equal(w.t, 0);
+  w.shift.start();
+  for (let i = 0; i < 600; i++) w.step(false);
+  assert.ok(Math.abs(w.t - 10) < 1e-6);
+  assert.ok(w.shift.clock > 9.9);
+  assert.ok(Number.isFinite(w.van.x));
+});
+
+test('the pass tracker forgets houses that go dark', () => {
+  const t = createPassTracker();
+  const h = { id: 1, dropX: 0, dropY: 0 };
+  t.step({ x: 0, y: 10, v: 200 }, [h]);
+  assert.deepEqual(t.step({ x: 0, y: 200, v: 200 }, []), []);
+});

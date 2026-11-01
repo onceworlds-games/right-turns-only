@@ -249,11 +249,10 @@ export function pushOut(city, px, py, r, env) {
       const ch = out ? 'x' : city.at(tx, ty);
       const i = out ? -1 : city.idx(tx, ty);
       let solidBox = false;
+      let cones = false;
       if (LOTS.has(ch)) solidBox = true;
-      else if (env && env.closed && i >= 0 && env.closed.has(i)) {
-        solidBox = true;
-        soft = true;
-      } else if (env && env.bridgeUp && ch === 'd') solidBox = true;
+      else if (env && env.closed && i >= 0 && env.closed.has(i)) solidBox = cones = true;
+      else if (env && env.bridgeUp && ch === 'd') solidBox = true;
       if (solidBox) {
         const zone = i >= 0 ? city.cut.get(i) : null;
         const p = zone ? pushCutBox(px, py, r, tx, ty, zone) : pushBox(px, py, r, tx * T, ty * T, (tx + 1) * T, (ty + 1) * T);
@@ -261,7 +260,7 @@ export function pushOut(city, px, py, r, env) {
           ox += p[0];
           oy += p[1];
           hit = true;
-          if (city.soft && ch !== 'w' && ch !== 'Q') soft = true;
+          if (cones || (city.soft && ch !== 'w' && ch !== 'Q')) soft = true;
         }
         continue;
       }

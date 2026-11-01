@@ -158,8 +158,11 @@ export function createDriver(opts = {}) {
   const skill = clamp(opts.skill ?? 1, 0, 1);
   const style = opts.style || 'steady';
   const rng = createRng(opts.seed ?? 1);
-  const reaction = 0.06 + (1 - skill) * 0.18; // s
-  const noise = (1 - skill) * 0.9;
+  // Hands: every bot drives cleanly enough to watch (a wall every few seconds looks broken, not human); skill mostly shows
+  // in choices: which house, the order, doormats, contested addresses, and the odd missed turn.
+  const hands = opts.hands ?? 0.7 + skill * 0.3;
+  const reaction = 0.06 + (1 - hands) * 0.18; // s
+  const noise = (1 - hands) * 0.9;
   const missChance = (1 - skill) * 0.12;
   const st = {
     plan: null, // { key, poly, cum, seg, endArc, made }
@@ -181,6 +184,10 @@ export function createDriver(opts = {}) {
     lastProgress: 0,
     lastProgressT: 0,
     chosen: null,
+    inStall: false,
+    escape: 0,
+    crashAt: null,
+    escapeUntil: -1,
   };
 
   function choose(van, ctx) {
@@ -343,10 +350,27 @@ export function createDriver(opts = {}) {
   function drive(van, ctx, dt = 1 / 60) {
     st.t += dt;
     if (van.stall > 0) {
+      if (!st.inStall) {
+        // A second crash in the same spot: it's pinned against something. Turn away once the stall ends.
+        st.inStall = true;
+        const c = st.crashAt;
+        st.escape = c && st.t - c.t < 3 && Math.hypot(van.x - c.x, van.y - c.y) < 50 ? st.escape + 1 : 0;
+        st.crashAt = { t: st.t, x: van.x, y: van.y };
+        st.escapeUntil = -1;
+      }
       st.queue.length = 0;
       st.hold = false;
       st.plan = null; // replan after the crash
       return false;
+    }
+    if (st.inStall) {
+      st.inStall = false;
+      if (st.escape > 0) st.escapeUntil = st.t + Math.min(1.2, 0.3 + 0.25 * st.escape);
+    }
+    if (st.t < st.escapeUntil) {
+      st.hold = true;
+      st.why = 'escape';
+      return true;
     }
     // What to go for.
     const want = choose(van, ctx);
@@ -418,7 +442,7 @@ export function createDriver(opts = {}) {
       want2 = false; // just let go of a loop: leave it alone until it's out
     } else if (Math.abs(angleDiff(card, lineH)) < 0.4) {
       // On a straight: drift right with short pulses only, each one small enough for the snap to pull straight again.
-      if (want2 && Math.abs(angleDiff(card, hNext)) < 0.025 && st.t >= st.tapNext) {
+      if (want2 && !van.zone && Math.abs(angleDiff(card, hNext)) < 0.025 && st.t >= st.tapNext) {
         st.tapUntil = st.t + 0.11;
         st.tapNext = st.t + 0.2;
       }

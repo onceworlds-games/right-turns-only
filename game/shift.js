@@ -5,11 +5,13 @@ import { DELIVERY, STARS, DEG } from './config.js';
 import { createRng, hashString } from './rng.js';
 import { inDepot } from './physics.js';
 import { closureSet, closedTiles } from './city.js';
+import { dijkstra, bestTo, dropTile } from './route.js';
+import { graphFor } from './driver.js';
 
 /** A shift's houses, in the order they load. Fixed per town; the daily's come from the date. */
 export function shiftHouses(city, opts = {}) {
   const town = city.town;
-  const count = opts.parcels || town.parcels;
+  const count = opts.parcels || (opts.daily !== undefined ? DAILY_PARCELS : town.parcels);
   const seed = opts.daily !== undefined ? hashString(`daily:${opts.daily}:${town.id}`) : hashString(`shift:${town.id}`);
   const rng = createRng(seed);
   const pool = city.addresses.slice();
@@ -21,20 +23,60 @@ export function shiftHouses(city, opts = {}) {
     }
   }
   const rest = rng.shuffle(pool.filter((h) => !first.includes(h)));
+  // Roadworks: never a house on a street the cones can turn into a dead end (loads top up, so any set may be out).
+  const traps = trapHouses(city);
+  const trapped = (h) => traps.has(h.id);
   // Spread them out: never two drops within 200 px in the same load.
   const out = first.slice();
   for (const h of rest) {
     if (out.length >= count) break;
     const load = out.slice(out.length - (out.length % DELIVERY.perLoad));
     if (load.some((o) => Math.hypot(o.dropX - h.dropX, o.dropY - h.dropY) < 200)) continue;
+    if (trapped(h)) continue;
     out.push(h);
   }
   for (const h of rest) {
     if (out.length >= count) break;
-    if (!out.includes(h)) out.push(h);
+    if (!out.includes(h) && !trapped(h)) out.push(h);
   }
   return out;
 }
+
+const trapSets = new Map();
+/**
+ * Houses on a street that a closure set turns into a dead end: arriving there, some way in has no way back to the depot in
+ * right turns. Without `k`, the houses any set traps. Only Coneyard has closures.
+ */
+export function trapHouses(city, k = 0) {
+  const key = `${city.id}:${k}`;
+  let set = trapSets.get(key);
+  if (set) return set;
+  set = new Set();
+  if (!k && city.town.cones) for (const j of [1, 2, 3]) for (const id of trapHouses(city, j)) set.add(id);
+  if (k) {
+    const graph = graphFor(city, closedTiles(city, k), `k${k}`);
+    const depotTile = city.idx(city.depot.tx, city.depot.ty);
+    const fromDepot = dijkstra(graph, depotTile * 4 + city.depot.dir);
+    for (const h of city.addresses) {
+      const tile = dropTile(city, h);
+      if (!Number.isFinite(bestTo(fromDepot, tile).time)) {
+        set.add(h.id);
+        continue;
+      }
+      for (let d = 0; d < 4; d++) {
+        if (!Number.isFinite(fromDepot.dist[tile * 4 + d])) continue;
+        if (!Number.isFinite(bestTo(dijkstra(graph, tile * 4 + d), depotTile).time)) {
+          set.add(h.id);
+          break;
+        }
+      }
+    }
+  }
+  trapSets.set(key, set);
+  return set;
+}
+
+export const DAILY_PARCELS = 9;
 
 /** Today's daily shift: a town (any of them) from the day number. */
 export function dailyTown(day, towns) {
@@ -204,3 +246,67 @@ export function createShift(city, opts = {}) {
   return s;
 }
 
+
+/**
+ * The shortest the shift could take in right turns: each load in its best order, from the depot and back, at the van's
+ * speeds along the right-turn graph (rings are passed at their middle). A lower bound in spirit: real driving adds corners.
+ */
+export function routeEstimate(city, houses, graphAt) {
+  const loads = [];
+  for (let i = 0; i < houses.length; i += DELIVERY.perLoad) loads.push(houses.slice(i, i + DELIVERY.perLoad));
+  const depotTile = city.idx(city.depot.tx, city.depot.ty);
+  let node = depotTile * 4 + city.depot.dir;
+  let total = 0;
+  const caches = new Map();
+  const from = (graph, n) => {
+    let cache = caches.get(graph);
+    if (!cache) caches.set(graph, (cache = new Map()));
+    let r = cache.get(n);
+    if (!r) {
+      r = dijkstra(graph, n);
+      cache.set(n, r);
+    }
+    return r;
+  };
+  loads.forEach((load, li) => {
+    const graph = graphAt(li);
+    const last = li === loads.length - 1;
+    let best = Infinity;
+    let bestEnd = node;
+    for (const order of permutations(load)) {
+      let t = 0;
+      let n = node;
+      for (const h of order) {
+        const b = bestTo(from(graph, n), dropTile(city, h));
+        t += b.time;
+        n = b.node;
+      }
+      if (!last) {
+        const b = bestTo(from(graph, n), depotTile);
+        t += b.time;
+        n = b.node;
+      }
+      if (t < best) {
+        best = t;
+        bestEnd = n;
+      }
+    }
+    total += best;
+    node = bestEnd;
+  });
+  return total;
+}
+
+function permutations(list) {
+  if (list.length <= 1) return [list];
+  const out = [];
+  list.forEach((x, i) => {
+    for (const rest of permutations(list.filter((_, j) => j !== i))) out.push([x, ...rest]);
+  });
+  return out;
+}
+
+/** The least final time a shift could honestly post (the daily list ignores anything quicker). */
+export function minPlausible(estimate, parcels) {
+  return Math.max(5, estimate * 0.6 - parcels * DELIVERY.matBonus);
+}

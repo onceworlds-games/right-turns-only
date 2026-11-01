@@ -1,12 +1,16 @@
 // A solo shift as one steppable world: the town, its traffic, the van and the rules. The page drives it with the player's
 // button; the tests and the expert-time script drive it with a bot. Pure: no page, no platform.
 
-import { DT } from './config.js';
-import { buildCity, bridgeState } from './city.js';
+import { DT, SCRAMBLE, STARS } from './config.js';
+import { buildCity, bridgeState, closedTiles } from './city.js';
+import { createRng } from './rng.js';
 import { createVan, stepVan } from './physics.js';
 import { createTraffic } from './traffic.js';
-import { createShift } from './shift.js';
-import { houseTarget, depotTarget, graphFor } from './driver.js';
+import { createShift, shiftHouses, routeEstimate, dailyTown, trapHouses, DAILY_PARCELS } from './shift.js';
+import { closureSet } from './city.js';
+import { TOWNS } from './towns.js';
+import { createDriver, houseTarget, depotTarget, graphFor } from './driver.js';
+import { newScramble, fillAddresses, openList, stepRunner, applyDrop, openLastCall, createRunner, scrambleTargets, scrambleClosure } from './scramble.js';
 
 const cities = new Map();
 /** One city per town (they never change). */
@@ -18,6 +22,32 @@ export function cityFor(town) {
   }
   return c;
 }
+
+/** Today's daily shift: { day, town, parcels }. */
+export function dailyShift(day) {
+  return { day, town: dailyTown(day, TOWNS), parcels: DAILY_PARCELS };
+}
+
+const estimates = new Map();
+/** The route time of a shift's best orders (seconds); opts: { daily } as for createShift. */
+export function estimateFor(town, opts = {}) {
+  const key = `${town.id}:${opts.daily ?? ''}`;
+  let e = estimates.get(key);
+  if (e === undefined) {
+    const city = cityFor(town);
+    const houses = shiftHouses(city, opts.daily !== undefined ? { daily: opts.daily } : {});
+    e = routeEstimate(city, houses, (li) => {
+      if (!town.cones) return graphFor(city);
+      const k = closureSet(li);
+      return graphFor(city, closedTiles(city, k), `k${k}`);
+    });
+    estimates.set(key, e);
+  }
+  return e;
+}
+
+/** Par: the expert time the stars are measured against. */
+export const parFor = (town, opts = {}) => Math.round(estimateFor(town, opts) * STARS.par * 10) / 10;
 
 /**
  * opts: { daily, houses }. world.step(hold) advances one fixed step (DT) and returns the shift's events plus the van's
@@ -81,4 +111,83 @@ export function runSolo(town, driver, opts = {}) {
     for (const e of w.step(hold)) if (e.type === 'done') done = e;
   }
   return { time: done ? done.time : Infinity, final: done ? done.final : Infinity, mats: w.shift.mats, crashes: w.shift.crashes, done: !!done, world: w };
+}
+
+/**
+ * A whole scramble shift with bots only (tests, the title scene, posters). opts: { drivers: [{ id, skill, style, seed }],
+ * seconds, seed }. Claims apply at once, first come first served, the way the host applies them.
+ */
+export function createScrambleWorld(town, opts = {}) {
+  const city = cityFor(town);
+  const traffic = createTraffic(city);
+  const seconds = opts.seconds || 120;
+  const rng = createRng(`scramble:${opts.seed ?? 1}:${town.id}`);
+  const rand = rng.next;
+  const data = newScramble(town.id);
+  const runners = (opts.drivers || []).map((d, i) => {
+    const r = createRunner(city, d.id || `bot:${i + 1}`);
+    r.seat = i;
+    r.driver = createDriver({ skill: d.skill, style: d.style, seed: d.seed ?? i + 1 });
+    // Spread out of the depot one after another.
+    r.delay = i * 0.45;
+    return r;
+  });
+  const w = { town, city, traffic, data, runners, t: 0, seconds, env: { closed: new Set(), bridgeUp: false, cars: [], vans: [], t: 0 }, done: false };
+  let closureK = town.cones ? scrambleClosure(0) : 0;
+  if (closureK) w.env.closed = closedTiles(city, closureK);
+  const avoid = () => (closureK ? trapHouses(city) : null);
+  fillAddresses(city, data, runners.map((r) => r.van), rand, runners.length, avoid());
+
+  w.graph = () => graphFor(city, w.env.closed, `k${closureK}`);
+  w.envAt = (t) => {
+    traffic.advanceTo(t);
+    if (town.cones) {
+      const k = scrambleClosure(t);
+      if (k !== closureK) {
+        closureK = k;
+        w.env.closed = closedTiles(city, k);
+      }
+    }
+    w.env.bridgeUp = city.drawbridges.length > 0 && bridgeState(t).up;
+    w.env.cars = traffic.bodies(t);
+    w.env.t = t;
+    return w.env;
+  };
+
+  /** One step; returns events: { type: 'drop', seat, house, mat, gold, x, y } | 'lastCall' | 'end'. */
+  w.step = () => {
+    const events = [];
+    if (w.done) return events;
+    const env = w.envAt(w.t + DT);
+    const open = openList(city, data);
+    const graph = w.graph();
+    for (const r of runners) {
+      if (w.t < r.delay) continue;
+      env.vans = runners.filter((o) => o !== r).map((o) => ({ id: o.id, x: o.van.x, y: o.van.y, h: o.van.h, v: o.van.v }));
+      const ctx = { city, graph, targets: scrambleTargets(city, data, r, houseTarget, depotTarget), env };
+      const hold = r.driver.drive(r.van, ctx, DT);
+      for (const p of stepRunner(r, hold, city, env, open)) {
+        const entry = applyDrop(data, r.seat, p.addr, p.mat, w.t * 1000);
+        if (!entry) {
+          r.p++; // taken a moment ago: the parcel comes back
+          continue;
+        }
+        r.delivered++;
+        if (p.mat) r.mats++;
+        events.push({ type: 'drop', seat: r.seat, house: p.house, mat: p.mat, gold: p.gold, x: p.x, y: p.y });
+        fillAddresses(city, data, runners.map((o) => o.van), rand, runners.length, avoid());
+      }
+    }
+    w.t += DT;
+    if (!data.lastCall && w.t >= seconds - SCRAMBLE.lastCall) {
+      const a = openLastCall(city, graph, data, runners.map((r) => r.van), rand, avoid());
+      events.push({ type: 'lastCall', addr: a });
+    }
+    if (w.t >= seconds) {
+      w.done = true;
+      events.push({ type: 'end' });
+    }
+    return events;
+  };
+  return w;
 }

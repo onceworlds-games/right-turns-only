@@ -177,25 +177,28 @@ function angleSpan(from, to, turned) {
 
 /** The nearest car straight ahead going the same way, close enough to follow: { v, close } (close: how much too near). */
 function carAhead(van, env) {
-  if (!env || !env.cars || !env.cars.length) return null;
+  if (!env) return null;
   const c = Math.cos(van.h);
   const s = Math.sin(van.h);
   let best = null;
   let bestD = Infinity;
-  for (const car of env.cars) {
-    if (car.walker) continue;
+  const look = (car) => {
+    if (car.walker || !Number.isFinite(car.h)) return;
     const dx = car.x - van.x;
     const dy = car.y - van.y;
     const along = dx * c + dy * s;
-    if (along <= 0) continue;
+    if (along <= 0) return;
     const across = Math.abs(-dx * s + dy * c);
-    if (across > car.wid / 2 + VAN.wid / 2 - 2) continue;
-    const gap = along - car.len / 2 - VAN.len / 2;
-    if (gap > DRIVE.followGap || gap >= bestD) continue;
-    if (Math.abs(angleDiff(van.h, car.h)) > 0.6) continue;
+    if (across > (car.wid || VAN.wid) / 2 + VAN.wid / 2 - 2) return;
+    const gap = along - (car.len || VAN.len) / 2 - VAN.len / 2;
+    if (gap > DRIVE.followGap || gap >= bestD) return;
+    if (Math.abs(angleDiff(van.h, car.h)) > 0.6) return;
     bestD = gap;
     best = { v: car.v || 0, close: Math.max(0, (DRIVE.followGap * 0.5 - gap) * 3) };
-  }
+  };
+  // Cars, and other vans going the same way (a van tucks in behind instead of shunting).
+  if (env.cars) for (const car of env.cars) look(car);
+  if (env.vans) for (const o of env.vans) look(o);
   return best;
 }
 

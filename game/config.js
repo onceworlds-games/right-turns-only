@@ -98,7 +98,8 @@ export const SCRAMBLE = {
 
 export const openAddresses = (seats) => (seats <= 2 ? 3 : seats <= 4 ? 4 : 5);
 
-export const STARS = { two: 1.3, three: 1.06 }; // within these multiples of the expert time
+// Par (the expert time) is the right-turn route time of the best orders × `par`; stars are within these multiples of it.
+export const STARS = { par: 1.25, two: 1.3, three: 1.06 };
 
 export const VAN_BODIES = [
   { id: 'box', name: 'Box Van', stars: 0 },
