@@ -312,6 +312,7 @@ export function createRenderer(hud, opts = {}) {
     sun.color.set(st.sun.color);
     sun.intensity = st.sun.intensity;
     hemi.color.set(st.sky);
+    waterSky.value.set(st.sky);
     hemi.groundColor.set(st.ground);
     hemi.intensity = st.hemi * 0.55;
     scene.background = new THREE.Color(st.fog);
@@ -321,7 +322,7 @@ export function createRenderer(hud, opts = {}) {
     shared.uNight.value = st.night;
     shared.uWet.value = st.wet;
     shared.uSnow.value = st.snow;
-    shared.uLampPower.value = st.night * 4.2;
+    shared.uLampPower.value = st.night * 5;
     mats.signs.emissiveIntensity = 0.08 + st.night * (city.town.night ? 2.4 : 1.2);
     mats.water.color.set(city.town.palette.water);
     const g = post.final.uniforms;
@@ -580,13 +581,16 @@ export function createRenderer(hud, opts = {}) {
   return R;
 }
 
+const waterSky = { value: new THREE.Color('#BFD7F2') };
+
 function waterMaterial() {
   const m = new THREE.MeshStandardMaterial({ color: '#3E8FC4', roughness: 0.06, metalness: 0.0, transparent: false });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = shared.uTime;
+    sh.uniforms.uSkyCol = waterSky;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nuniform float uTime;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nuniform float uTime;\nuniform vec3 uSkyCol;')
       .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
@@ -606,6 +610,18 @@ function waterMaterial() {
   vec2 p = vWP.xz;
   float glint = smoothstep(0.75, 1.0, sin(p.x * 0.8 + uTime * 0.7) * sin(p.y * 0.6 - uTime * 0.5));
   diffuseColor.rgb *= 0.9 + glint * 0.25;
+}`,
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+{
+  // The sky in the water at a glancing angle, and sun sparkles on the ripples.
+  float fres = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.5);
+  diffuseColor.rgb = mix(diffuseColor.rgb, uSkyCol, clamp(fres * 0.9 + 0.12, 0.0, 0.7));
+  vec2 q = vWP.xz;
+  float sp = sin(q.x * 3.1 + uTime * 2.0) * sin(q.y * 2.7 - uTime * 1.6) * sin((q.x + q.y) * 1.3 + uTime);
+  totalEmissiveRadiance += uSkyCol * smoothstep(0.82, 0.98, sp) * 0.35;
 }`,
       );
   };

@@ -516,7 +516,7 @@ export function buildTown(city, style) {
         b.box(x, 2.6, z, 1.2, 0.2, 1.2, '#8E8474');
         b.box(x, 2.8, z, 0.3, 0.5, 0.3, '#2A2E36');
         b.box(x, 3.3, z, 0.4, 0.35, 0.4, '#FFE7B0', { surf: SURF.lamp });
-        out.lamps.push({ x, y: 3.5, z, r: 9 });
+        out.lamps.push({ x, y: 3.5, z, r: 12 });
       }
     }
     out.bridges.push({ tx, ty, x: cx, z: cz, horiz });
@@ -584,7 +584,7 @@ export function buildTown(city, style) {
     const hz = z + az * 1.35;
     b.box(hx, KERB + 5.05, hz, 0.7, 0.24, 0.5, post);
     b.box(hx, KERB + 4.98, hz, 0.56, 0.08, 0.38, '#FFE7B0', { surf: SURF.lamp });
-    out.lamps.push({ x: hx, y: KERB + 4.9, z: hz, r: 11 });
+    out.lamps.push({ x: hx, y: KERB + 4.9, z: hz, r: 14 });
     void rng;
   }
 

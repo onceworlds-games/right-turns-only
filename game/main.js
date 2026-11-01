@@ -850,6 +850,7 @@ function boot() {
     const tip = tipFor({ mat, quick: clock - so.lastPay, level: so.flow.level, express });
     so.lastPay = clock;
     so.tips += tip;
+    S.punch = Math.max(S.punch || 0, express ? 1.4 : mat ? 1 : 0.6);
     if (!express) {
       so.stats.parcels++;
       if (mat) so.stats.mats++;
@@ -875,11 +876,15 @@ function boot() {
     const word = { perfect: 'PERFECT', near: 'CLOSE!', lap: 'ROUND!', threeRights: 'THREE RIGHTS' }[m.type];
     if (word) {
       fx.add('text', { x: van.x, y: van.y, text: word, color: m.type === 'near' ? '#FF9A5A' : '#F4F1E8', size: m.type === 'perfect' ? 26 : 30, dur: 0.9, small: true });
-      if (m.type === 'perfect') audio.play('perfect');
+      if (m.type === 'perfect') {
+        audio.play('perfect');
+        S.punch = Math.max(S.punch || 0, 0.5);
+      }
       if (m.type === 'near') audio.play('whoosh');
     }
     if (up) {
       so.flowPop = 1;
+      S.punch = 1.5;
       if (so.flow.level >= 5) award('full-flow');
       audio.play('flow', so.flow.level);
       fx.spawn(van.x, van.y, 18, { color: ['#FFC22E', '#F4F1E8', '#5BC4A0'], kind: 1, speed: 160, up: 220, life: 0.9, size: 4, z: 20 });
@@ -892,7 +897,10 @@ function boot() {
     if (!hard) {
       if (so.world.shift.clock - so.lastScrape < 0.6) return;
       so.lastScrape = so.world.shift.clock;
-    } else so.stats.crashes++;
+    } else {
+      so.stats.crashes++;
+      S.hitStop = 0.075;
+    }
     const before = so.flow.level;
     if (so.flow.crash(hard) && before >= 3) audio.play('flowLost');
   }
@@ -961,6 +969,8 @@ function boot() {
     const so = S.solo;
     const town = so.town;
     so.phase = 'done';
+    S.slowmo = 0.7;
+    S.punch = 1.5;
     audio.play('whistle');
     audio.drive(false, 0, false, 0);
     fx.spray('done', { lines: ['SHIFT', 'DONE'], ...paintAhead(so.world.van, 1), width: 110, hold: Infinity });
@@ -1212,9 +1222,10 @@ function boot() {
     // About 700 world px across the short side (less on a tall phone, so the vans stay big); a little more at speed so the
     // next turn is in view.
     const base = driveZoom();
-    const tz = clamp(base * (1 - 0.08 * clamp(van.v / 260, 0, 1)), 0.4, 1.6) * zoomBoost;
+    // A punch in on deliveries and flow, eased out.
+    const tz = clamp(base * (1 - 0.08 * clamp(van.v / 260, 0, 1)), 0.4, 1.6) * zoomBoost * (1 + 0.07 * Math.min(1.5, S.punch || 0));
     const k = 1 - Math.exp(-dt / 0.18);
-    const kz = 1 - Math.exp(-dt / 0.6);
+    const kz = 1 - Math.exp(-dt / (S.punch > 0.05 ? 0.12 : 0.6));
     S.cam.x += (tx - S.cam.x) * k;
     S.cam.y += (ty - S.cam.y) * k;
     S.cam.zoom += (tz - S.cam.zoom) * kz;
@@ -1247,6 +1258,7 @@ function boot() {
     const pitch = target.pitch ?? PITCH;
     S.cam.pitch = (S.cam.pitch ?? PITCH) + (pitch - (S.cam.pitch ?? PITCH)) * k;
     S.cam.yaw = (S.cam.yaw || 0) + ((target.yaw || 0) - (S.cam.yaw || 0)) * k;
+    S.cam.roll = (S.cam.roll || 0) + ((target.roll || 0) - (S.cam.roll || 0)) * k;
   }
 
   // ------------------------------------------------------------ layout helpers
@@ -1312,7 +1324,7 @@ function boot() {
       return;
     }
     if (view.cam) easeCam(view.cam, dt, S.camSnap ? 0.001 : 0.45);
-    else easeCam({ x: S.cam.x, y: S.cam.y, zoom: S.cam.zoom }, dt, 0.45); // only the tilt and turn move: back to the standard ones
+    else easeCam({ x: S.cam.x, y: S.cam.y, zoom: S.cam.zoom, pitch: view.pitch, roll: view.roll }, dt, 0.35); // only the tilt and turn move
     S.camSnap = false;
     view.cam = S.cam;
     view.fx = fx;
@@ -1429,6 +1441,11 @@ function boot() {
       ghost: so.ghostPos && so.phase === 'drive' ? so.ghostPos : null,
     };
     weather(view, city, w.t, van);
+    // The camera leans into a held turn and drops a little lower as the flow builds.
+    if (so.phase === 'drive' && !fx.reduced) {
+      view.roll = van.hold ? -0.03 * clamp(van.v / 240, 0, 1) : 0;
+      view.pitch = PITCH - (so.flow.level - 1) * 1.6 * (Math.PI / 180);
+    }
     if (so.phase === 'paused') view.desaturate = true;
     view.hud = (g) => {
       // On the results, the route you drove draws itself over the town.
@@ -1800,10 +1817,22 @@ function boot() {
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
     S.t += dt;
+    // Juice on solo shifts only (a scramble keeps the shared clock): a beat of slow motion as the last parcel lands, a
+    // few frames of hit-stop on a crash.
+    let gdt = dt;
+    if (S.slowmo > 0) {
+      S.slowmo -= dt;
+      gdt = dt * 0.3;
+    }
+    if (S.hitStop > 0) {
+      S.hitStop -= dt;
+      gdt = 0;
+    }
+    S.punch = (S.punch || 0) * Math.exp(-dt * 5);
     try {
-      tick(dt);
-      fx.update(dt);
-      draw(dt);
+      tick(gdt);
+      fx.update(gdt);
+      draw(gdt);
       audio.update();
     } catch (err) {
       console.error(err);

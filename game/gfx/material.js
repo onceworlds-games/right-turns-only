@@ -172,7 +172,8 @@ const LIGHTS = /* glsl */ `
     float ndl = clamp(dot(normal, -dir) * 0.7 + 0.3, 0.0, 1.0);
     add += vec3(1.0, 0.93, 0.78) * cone * att * att * ndl * uHeadPower * 2.2;
   }
-  reflectedLight.directDiffuse += diffuseColor.rgb * add;
+  // A little of the light whatever the surface, so a pool shows even on dark asphalt.
+  reflectedLight.directDiffuse += diffuseColor.rgb * add + add * 0.06;
 }
 `;
 
