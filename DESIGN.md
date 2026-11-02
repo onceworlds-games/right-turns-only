@@ -31,6 +31,12 @@ rights around a block, a U-turn is a lap of a roundabout, and the town is a puzz
   and gives a trailing van a way back.
 - **Unlockable vans** (new, cosmetic): star totals unlock six more van bodies. Same size and handling.
 - **The daily board** is a shared list in `ow.data.game`, because platform leaderboards keep a best-ever and can't reset daily.
+- **A career on top of the clock** (new in the rebuild): flow, tips, ranks, a garage, daily jobs, a streak and a challenge
+  per town. The clock and the stars still measure a shift; tips say how well it was driven, so a slow, clean, stylish run
+  still pays, and every shift moves something forward.
+- **Express parcels** (new): one timed gold parcel per shift from town 3, a reason to break the plan.
+- **3D** (new): the town, vans, traffic and people are a miniature in three.js instead of flat sprites. The camera stays
+  north-up so routes can still be learned.
 
 ## The first minute
 
@@ -47,7 +53,7 @@ A first-time player (no save) who is alone in the room goes from Play straight i
 | ~30 s | The roof rack is empty; the edge arrow turns blue and points at the depot. | `BACK TO DEPOT` |
 | any | A roundabout ahead: holding glides the van round it; letting go exits. | `HOLD TO GO ROUND` |
 | 40-60 s | Free deliveries. A slow pass through a ring's centre lands one on the doormat: ding-dong, −2.0 s on the clock. | `SLOW THROUGH THE MIDDLE` after two drops that missed the mat |
-| ~60 s | Sixth parcel: `SHIFT DONE` is sprayed on the road, then the results: the town map with the route as a trail, the time, stars stamping in. Again / Next town. | |
+| ~60 s | Sixth parcel: a beat of slow motion, `SHIFT DONE` sprayed on the road, then the results: the route drawn over the town, the time, stars stamping in, the tips counting up on the pay slip, the rank bar filling and the first garage unlock. Again / Next town. | |
 
 Each hint shows once ever (flags in `ow.save`), except one that returns for a stuck player (pressed against a wall without
 turning: `HOLD TO TURN`). Hints are short stacked words painted on the road, at least 18 px on a phone.
@@ -144,6 +150,14 @@ the same every time, so times compare, ghosts make sense and boards are fair.
 - **Play:** every van starts at the depot with 3 parcels. Open addresses are lit for everyone: 3 for 1-2 vans, 4 for 3-4,
   5 for 5-6. **The first van through a ring takes it**: 1 point, +1 on the mat. A replacement lights up at once, never within
   480 px of any van. Reload at the depot. Vans bump each other harmlessly (a honk and a nudge).
+- **Knock-offs:** a van driven hard into yours (doing 150 px/s or more straight at you) knocks a parcel off your roof
+  (`KNOCKED OFF!`). It tumbles into the road where you were hit and lies there for 30 s, a white parcel floating low over
+  the asphalt (`LOOSE!`), and the first van with room on its roof to drive over it (within 50 px) takes it (`+1 PARCEL`).
+  Only the van that was hit loses one: ram someone from behind or the side and you keep yours; meet head on and you both
+  lose one. Not at the depot (everyone crowds in to load), at most once every 1.5 s per van, at most 6 loose at once. Bots
+  are knocked like anyone and go for a loose parcel on the road within 520 px (keenly with an empty roof), giving up on one
+  they drove past. Sims (12 towns × 3 seeds, six bots, 2 minutes): about 9 knock-offs a shift, 85% picked up again, half
+  within 3.4 s. Winning the grab for one earns the Finders Keepers badge.
 - **Last call:** at 0:20 a golden address worth 3 lights up, a bell rings, and its arrow is gold. The host picks the house
   whose right-turn travel times from all present vans are closest together.
 - **Winner:** most points over the 3 shifts; ties share a place. Between shifts: 7 s over the town map with every van's trail.
@@ -160,19 +174,25 @@ the same every time, so times compare, ghosts make sense and boards are fair.
 
 **Netcode (who simulates what):**
 - **Your van:** your page simulates it (fixed 60 Hz). Presence ≤20 Hz:
-  `{ st: 'yard'|'route'|'play'|'watch', x, y, h (radians), v, k (holding), p (parcels 0-3), body, r (round id) }`. Others draw it
+  `{ st: 'yard'|'route'|'play'|'watch', x, y, h (radians), v, k (holding), p (parcels 0-3), s (stalled), body, tp (topper), wr (parcel wrap), r (round id) }`. Others draw it
   with `room.presenceAt(id, { angles: ['h'], snap: 200 })`. It is never corrected by the network.
 - **Bots:** simulated on the host's page with the same physics, published in the host's presence as
   `b: { 'bot:1': { x, y, h, v, k, p } }` (presenceAt interpolates nested fields). Checkpointed into `match.data.bots` every 2 s.
 - **Traffic, lights, pedestrians, trams, drawbridges:** a pure function of the town's seed and the shift clock
   (`match.elapsed`), stepped at a fixed 30 Hz on every page. Cars never react to vans, so every page agrees. Each page resolves
   only its own van against them (the host also resolves the bots).
-- **Bumps** between vans are local and cosmetic: each page nudges only its own van away from others' drawn positions.
+- **Bumps** between vans are local: each page nudges only its own van away from others' drawn positions. A hard hit is
+  decided by the page of the van that was hit (from the other van's drawn speed and heading): it takes the parcel off its
+  own roof and calls `host.rpc('knock', { x, y })` (rate 2/s); the host checks that the sender and another van were within
+  160 px of that spot and puts `{ id, x, y, at }` into `match.data.loose`. Picking one up is a claim,
+  `host.claim('grab', { args: { l }, key: l })`: the earliest van within 130 px (the parcel settled for 0.6 s) wins; the
+  grabber's page shows the parcel on its roof at once and takes it back if the claim is lost. The host clears parcels older
+  than 30 s. Bots knock and grab through `host.callAs` with the same checks.
 - **Deliveries** go through a claim: `host.claim('drop', { args: { a: t.string(12), m: t.boolean() }, key: (a) => a.a,
   rate: 4 })`. The host checks that the address is open, the round is playing, the sender has a parcel and its latest position
   is within 150 px of the ring. It applies the earliest valid claim by the room's clock, then writes `match.data`:
   `{ town, addrs: [{ id, house, gold }], seq, pts: {seat: n}, mats: {seat: n}, log: [[seat, house, mat, gold, ms]] (last 12),
-  bots, lastCall }`. Bots call the same claim through `host.callAs`.
+  bots, lastCall, loose: [{ id, x, y, at }] }`. Bots call the same claim through `host.callAs`.
 - **What you see at once:** the throw plays immediately on your page and your parcel count drops. A lost claim bounces the
   parcel back onto your roof with `TAKEN` and the winner's colour; a won claim was already shown.
 - **Scores:** `score(m)` returns `m.data.pts`, and the helper totals them. Only the host writes them.
@@ -181,20 +201,64 @@ the same every time, so times compare, ghosts make sense and boards are fair.
 
 ## Progression and reasons to come back
 
-- **Stars** per town (max 36). **Vans unlocked by stars**, all with the same size and handling. Pick one by tapping your van in
-  the yard:
-  Box Van (0), Bread Van (6★), Pickup (12★), Mail Truck (18★), Tuk-tuk (24★), Ice-Cream Van (30★), Golden Van (36★).
-  In a scramble your van keeps its body and takes your seat colour.
-- **Personal bests** per town and for today's daily, shown on the route board, the town card and results. Ghosts of each best.
-- **Leaderboards** (`ow.leaderboards`, 14 boards): `town-1`…`town-12` (seconds, lower is better), `wins` (scramble matches
-  won, running total), `deliveries` (lifetime parcels, running total).
+The clock and the stars measure a shift. **Tips** measure how well it was driven, and tips are the career (`career.js`, pure
+and node-tested).
+
+- **Flow, x1 to x5** (the meter bottom left). Good driving fills it:
+
+  | Move | Points |
+  |---|---|
+  | A right turn held to 45° or more | 1 |
+  | A *perfect* turn: settled within 5° of a road's direction 0.35 s after letting go, no scrape | 2 |
+  | A close call: a car passes within 40 px (52 px crossing your way) while you do over 150 px/s, untouched | 1.5 |
+  | A delivery / on the mat | 1 / 2.5 |
+  | A roundabout lap | 2 |
+  | Three rights in a row (a left the long way) | 3 |
+  | An express parcel | 3 |
+
+  Levels at 4, 10, 18 and 28 points (cap 34). After 3 s of nothing it drains 0.6 points/s, never below the level reached. A
+  crash empties it, a scrape takes 2 points. Each level adds 1.8% top speed. A level up flashes the meter, punches the camera in,
+  plays a chord and lowers the camera a little; from x3 the van leaves its trail.
+- **Tips** per delivery: 10, +10 on the mat, up to +9 for a quick drop (under 12 s since the last drop or load), +40 for an
+  express, all times the flow level. A shift adds 25 per star, 50 for a first clear, 20 for a new best and 100 for the town's
+  challenge. The coin counter top right counts up as they land.
+- **Express parcels** (from town 3, not in the daily): with the second load `EXPRESS CALL` is sprayed on the road and a gold
+  parcel lights up off the shift's list with a 32 s plate over it. Missed, it just goes; delivered, +40 tips before the flow.
+- **Ranks:** thirty titles, Trainee → Parcel Pup → Kerb Hopper → … → Senior Courier (10) → … → Clockwise Legend (30). Rank r to
+  r+1 costs 80 + 45·r tips: about 21,900 in all, weeks of shifts. The rank bar fills on the pay slip; a rank up stamps the new
+  title with a fanfare.
+- **The garage** (from the yard): the van turns on a turntable at the depot and changes as you tap.
+  - Vans (stars, same size and handling): Box Van (0), Bread Van (6★), Pickup (12★), Mail Truck (18★), Tuk-tuk (24★),
+    Ice-Cream Van (30★), Golden Van (36★).
+  - Paints (13): Courier Yellow, then a new one every few ranks (Post Red at 2 … Tangerine at 21), Teal for 10 jobs, Chrome for
+    a 7-day streak, Gold for 36 stars.
+  - Toppers on the roof (9): a traffic cone (rank 3), a pennant, a rubber duck (3-day streak), a light bar, a parcel tower, a
+    satellite dish, a pine tree (6 town challenges), a crown (all 12).
+  - Flow trails (7): sparks, confetti, bubbles, rainbow, stars, flames, from x3 flow.
+  - Parcel wraps (7), on the roof, in the air, on the mat and over the addresses: brown paper, Priority Blue (rank 4),
+    Fragile (8), Gift Wrap (13), Neon (19), Mint Box (40 jobs), Royal Purple (3 medals).
+  - Locked items show what opens them. New ones are announced on the pay slip (`NEW IN THE GARAGE`) and the garage sign
+    gets a dot until you look. In a scramble your van keeps its body and topper and takes your seat colour.
+- **Daily jobs:** three a day from eleven kinds (land n on the mat, n perfect turns, reach flow xn, n close calls, lap a
+  roundabout, n clean shifts, an express, n stars, n tips, n shifts, n parcels), the same for everyone that day, 50-80 tips each,
+  paid once. On the courier's card in the yard and on the pay slip.
+- **The streak:** a shift on consecutive days builds it (the flame chip on the card); a missed day starts again. Chrome
+  paint at 7 days, the Stars trail at 14.
+- **Town challenges** (a medal each, 100 tips once): Maple Row every parcel on the mat; Bramble Park no crash; Fiveways three
+  roundabout laps; Midtown six close calls; Gull Harbour flow x5; Frostby no crash on the ice; Neon Heights three rights twice;
+  Dustwater three stars; Rainmoor 12 perfect turns; Coneyard the express; Tramline 8 perfect turns and no crash; Twelve Bridges
+  every parcel on the mat. Shown on the town card.
+- **Stars, bests and ghosts:** stars per town (max 36), personal bests per town and for today's daily, the ghost of each best.
+- **Leaderboards** (`ow.leaderboards`, 15 boards): `town-1`…`town-12` (seconds, lower is better), `wins`, `deliveries`
+  (lifetime parcels) and `tips` (lifetime tips: the career).
 - **Daily board:** `ow.data.game` list `daily` (`max: 100, bytes: 64`, declared in `onceworlds.json`). A player pushes
   `{ d: dayNumber, t: centiseconds }` when they beat their own best for today, and only when the time is at or above the
   day's floor. The daily card keeps today's entries, drops anything under the floor or malformed, takes each player's best
   and shows the top 10.
-- **Saves** (`ow.save`): `profile` (stars, bests, unlocked town, body, lifetime mats/deliveries/wins, hint flags),
-  `ghost-<town>` (5 Hz samples, quantised and delta-coded, about 3.4 KB for a 100 s run), `daily` (day, best, ghost).
-- **Badges** (9):
+- **Saves** (`ow.save`): `profile` (stars, bests, unlocked town, body, tips, garage choices, medals, today's jobs and stats,
+  the streak, lifetime mats/deliveries/wins, hint flags), `ghost-<town>` (5 Hz samples, quantised and delta-coded, about 3.4 KB
+  for a 100 s run), `daily` (day, best, ghost).
+- **Badges** (13):
 
 | id | Name | Earned |
 |---|---|---|
@@ -207,6 +271,10 @@ the same every time, so times compare, ghosts make sense and boards are fair.
 | `no-scratches` | No Scratches | Finish a 9+ parcel shift without a crash |
 | `daily-driver` | Daily Driver | Finish a daily shift |
 | `all-stars` | All Stars | Three stars in every town |
+| `full-flow` | Full Flow | Reach flow x5 in a shift |
+| `express` | Express | Deliver an express parcel in time |
+| `senior-courier` | Senior Courier | Reach rank 10 |
+| `finders-keepers` | Finders Keepers | Win the grab for a parcel knocked off another van in a scramble |
 
 ## Balance and timing
 
@@ -249,7 +317,7 @@ the same every time, so times compare, ghosts make sense and boards are fair.
   the crow flies below 0.5 (and the rookie), by route time above, contested addresses discounted from 0.8. Doormat attempts at
   0.7 and up (Rosa always).
 
-**Checked in node tests** (`npm test`, 26 tests):
+**Checked in node tests** (`npm test`, 47 tests):
 - Every town builds; every address is reachable in right turns from the depot; fixed shift houses per town.
 - Handling: a held turn at a junction comes out a clean 90° when let go near the new road; a tap on a straight swerves and
   comes back; a held van rounds every turning bulb; crashes stall, scrapes and soft hedges don't.
@@ -262,8 +330,19 @@ the same every time, so times compare, ghosts make sense and boards are fair.
 - Scramble sims (12 towns × 2 seeds × 6 bots, 120 s): 5-15 deliveries per van on average, no runaway, exactly one last call
   per shift; the real line-up all score and the veteran beats the rookie; new addresses never land on an open one or near a
   van; claims (open, closed, no parcels, too far, double); the last call goes to a house the vans are about equally far from.
-- Not covered: room flow through a fake room (host reload, leavers, a host change mid-shift). A scramble with one player and
-  five bots was played on the local platform; the host-change path is untested.
+- Career: flow levels, drain and crashes; perfect turns, sloppy turns, scraped turns and close calls from van and car
+  motion; tips and shift bonuses; thirty ranks and their total; every garage item unlockable; daily jobs fixed per day;
+  daily stats; the streak across days; every town's challenge passes a perfect shift and fails a poor one; settling a shift
+  pays jobs and the medal once and never changes the profile it was given. The express parcel's call, timer and expiry.
+- Knock-offs: only the van driven into loses a parcel (rear-end, T-bone, head on, a slow nudge, an empty roof, the
+  cooldown, the depot); loose parcels' ids, cap, settling, reach, expiry and claims; a shift of six bots in every town keeps
+  every roof at 0-3 parcels and never picks up a parcel that wasn't knocked loose; bots go for loose parcels on the road
+  near them (more keenly with an empty roof) and give up on one they drove past. Over 12 towns × 3 seeds that is about 9
+  knock-offs per two-minute shift, 85% picked up again, half of them within 3.4 s.
+- Wraps: every wrap has its card and tape colours and can be unlocked; a settled shift announces the wraps it unlocks.
+- Not covered by node tests: room flow through a fake room. On the local platform (`onceworlds check`): two players join one
+  server, the match starts from the platform's lobby, the host reloads and comes back into the same server, the host
+  leaves and the other player takes over.
 
 ## Every screen
 
@@ -271,28 +350,37 @@ the same every time, so times compare, ghosts make sense and boards are fair.
    asphalt round a painted curling arrow, bot vans delivering and looping the mini-roundabouts, the camera drifting. The title
    is the road paint itself. Lower centre: the Play sign, a round blue mandatory-direction sign with the white curl and PLAY
    under it (112 px on phones, 136 px on big screens, 96 px on short landscape screens). Nothing else.
-2. **The yard (lobby and hub).** Top-down depot yard, filling the screen.
-   - The depot building at the top: the Clockwise Couriers logo and name (a compact version on short screens).
-   - Six loading bays (2 columns in portrait). Each: the van parked nose-up in its seat colour, the name on the bay floor with
-     the seat symbol (yours in yellow), the bay light (amber, green when ready), a courier cap on the host's van. Empty seats
-     are faded.
+2. **The yard (lobby and hub).** The depot's forecourt in 3D, seen from the street.
+   - Six numbered bays painted on the concrete under the depot's gantry, in one row (two staggered rows in portrait). Each
+     seat's van stands in its bay in its seat colour, with its body and topper; an open seat keeps a dull stock van. Over each
+     van: a name pill with the seat symbol (yours yellow), a courier cap on the host's, a green READY chip. A van hops when its
+     player readies.
+   - The courier's card top left: rank and title with its bar, the streak flame, today's three jobs with their progress.
    - Settings: two green signposts top right, `TOWNS / MIXED` and `SHIFT / 2:00`. Tap to cycle (the host, in the lobby);
      read-only for others.
-   - Bottom row: THE ROUTE (stars n/36), DAILY (today's town), YOUR VAN (tap to cycle unlocked bodies) and INVITE
+   - Bottom row: THE ROUTE (stars n/36), DAILY (today's town), GARAGE (a dot when something new is in) and INVITE
      (`ow.ui.showInvite()`). The platform's Ready/Start bar sits under them; nothing of ours under it.
-3. **Route board.** The 12 towns as a list of stops: number (or a padlock), name, stars and best. The town itself is drawn
-   live behind. Tap a stop for its card: the name on a green sign, your best, the 2★ and 3★ times, the town's top 5, DRIVE and
-   BACK.
-4. **Daily card.** `DAILY · <town>`, 9 parcels, your best today, the 2★/3★ times, today's top 10, DRIVE.
-5. **Play HUD (solo).**
+3. **Garage.** The camera drops low down the street to the turntable by the depot, the van turning on it.
+   A panel (on the right on wide screens, under the van on phones) with five tabs: VAN, PAINT, TOPPER, TRAIL, WRAP. Swatches and
+   names; locked ones are dimmed with what opens them (`RANK 8`, `7-DAY STREAK`, `6 MEDALS`). Picking one spins the
+   turntable faster and bounces the van. BACK returns to the yard.
+4. **Route board.** The 12 towns as a list of stops: number (or a padlock), name, stars and best. The town itself is drawn
+   live behind. Tap a stop for its card: the name on a green sign, your best, the 2★ and 3★ times, the town's challenge (with its
+   medal once won), the town's top 5, DRIVE and BACK.
+5. **Daily card.** `DAILY · <town>`, 9 parcels, your best today, the 2★/3★ times, today's top 10, DRIVE.
+6. **Play HUD (solo).**
    - Top right (below the platform's menu on phones): the clock, a white speed-limit sign with a red ring; the ghost delta
      under it for 3 s after each drop.
    - The manifest, one box per parcel (dashed outline, a parcel with a green tick, or a white tick for a doormat): top centre
      when there's room, else under the menu on the left.
-   - In the world: parcels on the van's roof, edge arrows to off-screen targets (yellow with a parcel; blue with the curl for
-     the depot), road-paint hints.
+   - Under the clock: the tips counter, a gold coin and the running total, counting up as tips land.
+   - Bottom left: the flow meter, a road-sign plate with xN and five rising bars that fill; it flashes and grows on a level up.
+   - Over an express house: the EXPRESS plate with its seconds left.
+   - In the world: parcels on the van's roof, each address marked by a parcel floating on a pillar of light with a ring on the
+     road, edge arrows to off-screen targets (yellow with a parcel; blue with the curl for the depot), road-paint hints, and
+     words for the moves (`PERFECT`, `CLOSE!`, `ROUND!`, `THREE RIGHTS`) and the tips (`+30`) rising off the van.
    - HUD laid out from `ow.ui.reserved`, read live.
-6. **Play HUD (scramble).**
+7. **Play HUD (scramble).**
    - Top right: the countdown clock sign (red in the last 10 s).
    - Under it: standings as stacked green exit-sign plates (place, seat symbol, name, points; top 3 plus yours on phones).
      Yours has a yellow border.
@@ -301,28 +389,39 @@ the same every time, so times compare, ghosts make sense and boards are fair.
      (at most two per ring), so you can see a race coming.
    - Intro: the town's name and a big 3-2-1 over the whole town. `LAST CALL ×3` when the golden address lights up.
    - Watching: the camera follows the leader, tap for the next van, `WATCHING · NEXT SHIFT` at the bottom.
-7. **Between shifts.** The whole town from above with every van's trail in its colour, `SHIFT n DONE`, the plates. 7 s.
-8. **Results (scramble).** The yard with three raised loading docks painted 1, 2, 3, the top three vans on them, the winner
-   spinning donuts, confetti. 15 s, then the yard.
-9. **Results (solo).** The town map fitted beside or under the numbers, with your route as a trail and the drops marked. The
-   final time huge, the doormat sum or the par under it, stars stamping in, `NEW BEST` painted at the depot. Signs: AGAIN
-   (Space), NEXT TOWN (Enter), YARD (Esc). In landscape the numbers sit in a column on the right.
-10. **Pause (solo).** A band across the middle reads PAUSED, with RESUME (Esc), RESTART (R) and YARD.
-11. **Room closed.** A band with one line and one sign that reloads the page (removed / connection lost / another tab).
+8. **Between shifts.** The whole town from above with every van's trail in its colour, `SHIFT n DONE`, the plates. 7 s.
+9. **Results (scramble).** The podium on the depot forecourt: three plinths (gold, silver, bronze), the top three vans on them
+   with their toppers, the winner spinning donuts, confetti bursts, places 4-6 parked behind, a tag with the points over each,
+   `SHIFT SCRAMBLE` and your place. The plinths go to the first three in place order, each as tall as the place of the van
+   on it: two vans tied for first both stand on gold and spin. 15 s, then the yard.
+10. **Results (solo).** The town from above beside or under the numbers, your route drawn over it in yellow and the drops
+   marked. The final time huge, the doormat sum or the par under it, stars stamping in, `NEW BEST` painted at the depot. Under
+   them the pay slip: the tips count up with a coin tick (DRIVING, STARS, NEW TOWN, NEW BEST, CHALLENGE, JOBS chips), the
+   rank bar fills (a rank up stamps the new title), today's jobs tick off, the medal, the streak chip and `NEW IN THE GARAGE`.
+   Signs: AGAIN (Space), NEXT TOWN (Enter), YARD (Esc). In landscape the numbers sit in a column on the right.
+11. **Pause (solo).** A band across the middle reads PAUSED, with RESUME (Esc), RESTART (R) and YARD.
+12. **Room closed.** A band with one line and one sign that reloads the page (removed / connection lost / another tab).
 
 All buttons are real `<button>`s styled as signs: ≥56 px on phones, text ≥18 px, keycaps shown on desktop. Screens are
-canvas-drawn worlds with DOM signs over them.
+the 3D world with DOM signs over them.
 
 ## Art direction
 
-**The world:** a miniature toy town seen straight down at noon, built from painted wood and road paint. It's the courier
-company Clockwise Couriers' patch, and its logo is a fat arrow curling right.
-- Asphalt with crisp white and yellow markings. Concrete kerbs and pavements.
-- Chunky houses: flat colourful roofs shaded as gables (sun-side lighter), chimneys, solar panels, porches with doormats,
-  front paths, mailboxes, hedges and fences.
-- Downtown blocks: flat roofs with AC units, water towers, striped shop awnings.
-- Trees as clustered round canopies with a highlight, drawn above the vans.
-- Strong soft shadows down-right from a top-left sun. (No tilt-shift blur: it cost too much on phones for what it added.)
+**The world:** a miniature toy town in 3D, seen from a model-railway angle (a 30° lens tilted 59° down, north-up), built from
+painted wood and road paint. It's the courier company Clockwise Couriers' patch, and its logo is a fat arrow curling right.
+- Asphalt with grain, crisp white and yellow markings, concrete kerbs and paving, all drawn in the shader on merged geometry
+  (one draw call per 4×4-tile chunk).
+- Houses generated per lot from a seed: gables, hips and flat roofs with tiles, chimneys with smoke, porches with doormats and
+  doors that open, gardens with fences, hedges, mailboxes, bins and dogs. Downtown blocks with shopfronts, awnings and painted
+  shop signs; water with quays and drawbridges; parks with trees whose leaves move in the wind.
+- People and cars are bought-in CC0 models (Quaternius: eight people, two dogs, seven cars; see CREDITS.md). The vans, buses
+  and the tram are modelled in code.
+- Light per town: a low warm sun with soft shadows, sky and fog colours, a grade. Night and dusk towns light street lamps,
+  windows, headlights and neon in the shader (no light objects). After the scene: a tilt-shift band (sharp through the middle,
+  soft above and below, the miniature look), bloom on lamps, neon and gold, the town's grade and a vignette.
+- When the van goes behind a building, a round cutaway dissolves what's in front of it, so the van is never lost.
+- Weather on the GPU round the camera: rain streaks and splashes (Rainmoor), snow (Frostby), sand storms that close the fog in
+  (Dustwater), falling leaves (Maple Row, Bramble Park), fireflies at dusk.
 
 **Palette (the game's own, on every screen):**
 
@@ -349,17 +448,21 @@ painted on the asphalt in white Barlow Condensed Black, stacked short words the 
 with a quick spray-on wipe and wears off when it's done. (`TAKEN`, `+1` and town names float as outlined text instead.) The curling-right arrow is the brand mark inside it: on vans, the depot roof, the Play sign and
 the icon.
 
-**Camera and light:** orthographic, north-up (the map stays still so routes can be learned), leading along the heading.
-Night, dusk and dust towns composite a light layer (headlight cones, lamp pools, lit windows) over a dark tint.
+**Camera:** north-up (the map stays still so routes can be learned), leading along the heading. It leans into a held turn,
+punches in on deliveries and flow level-ups, and comes a little lower as flow builds. The yard, garage and podium have their
+own framings at the depot (the garage drops low down the street to the turntable).
 
-**Vans:** seen from above.
-- Body in the van's colour (solo: courier yellow), a navy curl-arrow roof logo, a dark windscreen with a highlight, mirrors.
-- Lights: headlights, tail lights that glow red below 210 px/s (the doormat cue), and right indicators that blink amber at
-  2.5 Hz while you hold.
-- Parcels stack on the rear rack. Other vans carry a name tag (no roof decals or initials: at phone zoom they read as noise).
-- The body rolls outward in turns, squashes on crashes, bounces on loading.
-- Cars: hatchbacks and taxis in town colours with brake lights, buses in Midtown, a tram in Tramline. Pedestrians: tiny
-  top-down people (umbrellas in Rainmoor) who hop clear of a van's path; vans never touch them.
+**Vans:** seven bodies modelled in code (box van, bread van, pickup, mail truck, tuk-tuk, ice-cream van, golden van), each
+on a sprung rig.
+- Body in the van's paint (solo: your garage paint, courier yellow at first; scramble: the seat colour), the curl-arrow logo,
+  glass, mirrors, wheels that roll and steer.
+- Lights: headlights, brake lights that glow below 210 px/s (the doormat cue), the right indicator blinking at 2.5 Hz while you
+  hold, hazards in a stall.
+- Parcels strapped on the roof rack, the topper on top. Other vans carry a name tag.
+- The body rolls out of turns, dips under the brakes, squashes on crashes, bounces on loading.
+- Cars lean out of their turns and dip under the brakes, brake lights on as they slow; buses in Midtown, a tram in Tramline.
+  Walkers gather at the kerb and cross the zebras (umbrellas in Rainmoor) and jump clear of a van; vans never touch them. At
+  every delivery the resident opens the door, comes out to the mat, cheers and carries the parcel in.
 
 **HUD in the world's language:** road signs (the clock is a speed-limit sign, standings are exit-sign plates, the Play button is
 a mandatory-direction sign), traffic cones for the rounds, road paint for words. Text over the scene is white with a 4 px ink
@@ -367,14 +470,20 @@ outline or sits on a solid sign. Colour always comes with a shape: seat symbols 
 hexagon), gold addresses carry ×3.
 
 **Juice:**
-- Turning: the indicator ticks, the tyres squeal above 200 px/s, skid marks are left on the road.
-- Delivery: the parcel arcs to the porch with a squash, dust puff, a +1 rising, the manifest box ticks.
+- Turning: the indicator ticks, the tyres squeal above 200 px/s and smoke when held at speed, tyre marks (snow tracks in
+  Frostby) stay on the road.
+- Moves: `PERFECT`, `CLOSE!`, `ROUND!` and `THREE RIGHTS` pop off the van; each feeds the flow meter, which flashes, grows and
+  rings a chord on a level up while the camera punches in.
+- Flow trails from x3: sparks, confetti, bubbles, rainbow, stars or flames behind the van (the garage's choice).
+- Delivery: the parcel arcs from the roof to the mat, the resident comes out and cheers, a ring burst, the tips rise in
+  green (gold for an express), the coin counter ticks, the camera punches in (harder for the mat and the express).
 - Doormat: ding-dong, a white ring burst, −2.0 rising from the porch.
-- Crash: bonk, shake, steam, hazards.
+- Crash: a few frames of hit-stop, bonk, shake, steam, hazards, the flow meter empties.
 - Loading: boxes fly onto the roof one by one with thunks.
 - Address taken: the ring pops in the winner's colour.
-- Shift done: confetti of tiny parcels.
-- `reducedMotion`: no shake, no flashes, fewer particles.
+- Last parcel: a beat of slow motion and a big punch in, then `SHIFT DONE` and confetti of tiny parcels.
+- The pay slip counts up with coin ticks; a rank up stamps the title with a fanfare.
+- `reducedMotion`: no shake, punches or flashes, fewer particles.
 
 ## Sound
 
@@ -407,8 +516,9 @@ All drawn by the game's own renderer from `?poster=<name>` (`poster.js`), from s
 - **Multi** (`thumb-4`): Fiveways at the last call: six vans on the roads into the gold ×3 address with name tags and rival
   chevrons, the red 0:14 clock and the standings plates. (Staged: vans the sim left out of shot are placed on the roads in.)
 - **Icon** (512): the blue mandatory-direction plate with the white curl arrow, the yellow van riding it. No text.
-- **Badges** (256): bold symbols on coloured discs: a parcel, a loop of right turns, a parcel on a doormat, roundabout arrows,
-  a stopwatch, a map pin, a gleaming van, a calendar with a curl, three stars.
+- **Badges** (256, all 13): bold symbols on coloured discs: a parcel, a loop of right turns, a parcel on a doormat, roundabout
+  arrows, a stopwatch, a map pin, a gleaming van, a calendar with a curl, three stars, five full rising bars, a parcel with a
+  lightning bolt, the courier's cap with a star, and a tilted parcel knocked loose with a yellow bang and speed lines.
 - **Trailer** (`store/trailer.mp4`, 23.4 s, 1280×720 30 fps H.264 + AAC, 7.5 MB): real play with the game's own sound, six
   hard cuts. Takes captured in virtual time from `?autoplay=1&town=n&zoom=k` (the bot brain at skill 1 drives the player's van),
   `?autoplay=1&scramble=1&zoom=1.25` (a full scramble shift with five bots) and `?title=1` with the Play sign hidden.
@@ -435,17 +545,36 @@ All drawn by the game's own renderer from `?poster=<name>` (`poster.js`), from s
 
 ## Tech
 
-- Canvas 2D, plain ES modules, no build: `"dir": "game"`. No libraries. Fixed 60 Hz simulation with an accumulator. Canvas sized
-  by `ow.settings.pixelRatio(2)`.
-- The static town (roads, lots, houses) is drawn into cached 480 px chunks at the current scale (capped lower on low and
-  medium quality). Trees, the depot gantry and parcels over houses are drawn above the traffic each frame. Vans and cars are
-  pre-rendered sprites with separate shadow sprites. Marks (skids, snow tracks) go to a half-resolution canvas. Night and dusk
-  towns draw a half-resolution light layer over a dark tint. Low quality halves the particles.
+- three.js 0.187 and Vite: `npm run build` writes `dist/` (`"dir": "dist"`). Fixed 60 Hz simulation with an accumulator;
+  rendering is a pure function of a view object the game builds each frame. Canvas resolution from the governor below.
+- **Join first:** the page's first script (`start.js`, 60 KB) joins the room; the game's code (three.js and the rest) loads
+  once the platform's handshake is over, and the town is built only once the platform has answered the join (or after 8 s),
+  so a slow machine's reload never misses its seat. A page reloaded into a shift under way goes straight back to it, without
+  building the title town first.
+- **Shaders built a few at a time:** the shader programs the scene needs that aren't built yet are built in tasks of their
+  own (8 ms each), and until they are, the objects that need them sit out the frame; the rest is drawn every frame (a page
+  that stops drawing can stop getting frames). With KHR_parallel_shader_compile (most GPUs) a link runs off the page and is
+  read back once done; without it (SwiftShader) each program holds the page for a second or more between frames. So nothing
+  makes materials per frame: road paint is drawn into a decal once (equal paint handed over again reuses it), people and
+  garden dogs out of sight are pooled, not rebuilt.
+- **Quality governor:** the player's Graphics choice is the ceiling (`ow.settings.choice`); under it the game times its own
+  frames: slower than 40 ms on average over 1.5 s steps down (resolution first at high quality, then quality, then
+  resolution to half), faster than 19 ms for 8 s steps back up one level (a level that was too slow waits a minute). Without
+  a GPU (SwiftShader, llvmpipe) it stays at low quality, starts at half resolution, draws the screen without multisampling
+  and skips the sky's reflections (the store art does none of that).
 - **Pure modules** (node-tested, no DOM): `config.js`, `rng.js`, `towns.js` (12 ASCII maps and town data), `city.js` (map →
   geometry, houses, drop points, colliders), `physics.js`, `traffic.js`, `route.js` (right-turn graph), `driver.js` (bot brain),
-  `shift.js` (solo rules), `scramble.js` (multiplayer rules), `ghost.js`.
-- **Page modules:** `main.js`, `net.js` (room, match, host, bots, stub room), `render.js`, `sprites.js`, `fx.js`, `hud.js`,
-  `ui.js`, `yard.js` (the yard and podium), `audio.js`, `poster.js` (store art, `?poster=<name>`).
+  `shift.js` (solo rules, the express), `scramble.js` (multiplayer rules), `ghost.js`, `career.js` (flow, moves, tips, ranks,
+  the garage lists, jobs, the streak, challenges, settling a shift).
+- **Page modules:** `start.js` (join, then load the rest), `main.js`, `net.js` (room, match, host, bots, stub room), `world.js`, `forecourt.js` (the yard, garage
+  and podium views at the depot), `fx.js` (effect state), `hud.js` and `draw2d.js` (the canvas HUD over the scene),
+  `sprites.js` (2D badges and icons), `ui.js` (DOM signs and panels), `audio.js`, `poster.js` (store art, `?poster=<name>`).
+- **`game/gfx/`** (three.js): `renderer.js` (camera, sun, shadows, post), `town.js`, `houses.js`, `build.js` (merged
+  geometry), `material.js` (shader patterns, lamps, wind, wet), `style.js` (per-town light and colour), `signs.js`, `van.js`,
+  `vans-layer.js`, `traffic-layer.js`, `people-layer.js`, `marks-layer.js`, `fx-layer.js`, `weather-layer.js`, `post.js`,
+  `models.js` (glTF loading). Models are baked small with `npm run bake` (meshopt, quantised, only the clips used).
+- Quality levels: low drops shadows and post (and thins the weather and particles), medium keeps them with a smaller
+  shadow map and no multisampling, high has both at full size.
 - **Debug and capture:** `?autoplay=1` (outside production only) drives your van with the skill-1 brain. `?town=n` starts
   that town, `?scramble=1` readies in the yard for a scramble, `?autoplay-to=lobby` opens the yard. For footage, `?zoom=k`
   brings the camera closer and `?hints=0` keeps the road free of hints.
@@ -468,5 +597,7 @@ All drawn by the game's own renderer from `?poster=<name>` (`poster.js`), from s
   is validated. Bots survive a host change through presence plus checkpoints.
 - **Scope (12 towns, 7 vans).** Towns are ASCII maps over one generator for houses and decor. Each town's feature is one
   flag on the town (snow, night, dust, rain, cones, tram, bridges).
-- **Performance on phones.** Chunk caches, sprites, pooled particles, quality tiers from `ow.settings.quality`.
+- **Performance on phones.** One merged mesh per town chunk, instanced cars, shader-lit lamps (no light objects), GPU
+  weather, pooled effects, quality tiers under the player's Graphics choice, shaders built ahead of the frame. Under software
+  graphics a frame takes ~200 ms: playable to look at, not to race.
 - **iOS Safari.** No canvas `filter`, long-press suppression, audio unlocked from the in-game Play tap.
