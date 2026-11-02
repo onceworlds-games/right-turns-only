@@ -166,6 +166,8 @@ export function createRenderer(hud, opts = {}) {
     renderer.setRenderTarget(null);
   }
 
+  if (import.meta.env.DEV) R.debugWarm = () => ({ cold: cold.map((o) => `${o.type}:${o.name}:${o.visible}:${[].concat(o.material).map((m) => `${m.type}${m.id}.${m.version}`).join(',')}:${o.parent ? o.parent.type : '-'}`), built: built.size, queued: warmQueued, warmFor, post: post.cold(built), targets: !!post.targets, keys: cold.slice(0, 4).map((o) => [].concat(o.material).map((m) => [warmFor + variant(o, m), built.has(warmFor + variant(o, m)), o.matrixWorld.elements[13].toFixed(1), o.frustumCulled, !!o.geometry.boundingSphere])) });
+
   // ---------------------------------------------------------------- towns
 
   function makeTown(city) {

@@ -173,9 +173,11 @@ export function createMarksLayer(R) {
   // Painted words.
   const decals = new Map(); // paint object → { mesh, canvas, tex, wipe }
 
+  const keyOf = (p) => `${(p.lines || [p.text]).join('/')}|${p.arrow ? 'a' : ''}|${p.color || ''}|${p.upright ? 1 : 0}|${Math.round((p.h || 0) * 100)}|${p.width || ''}|${p.max || ''}|${p.size || ''}`;
+
   function paintDecal(p) {
     let d = decals.get(p);
-    const key = `${(p.lines || [p.text]).join('/')}|${p.arrow ? 'a' : ''}|${p.color || ''}|${p.upright ? 1 : 0}|${Math.round((p.h || 0) * 100)}`;
+    const key = keyOf(p);
     if (!d || d.key !== key) {
       if (d) {
         group.remove(d.mesh);
@@ -299,7 +301,21 @@ export function createMarksLayer(R) {
       for (let i = cs.length; i < chevs.length; i++) chevs[i].visible = false;
       // Paint.
       for (const d of decals.values()) d.seen = false;
-      for (const p of view.paint || []) if (p.alpha > 0) paintDecal(p);
+      const shown = (view.paint || []).filter((p) => p.alpha > 0);
+      // A view may hand over the same words as new objects each frame: those take over the decal already painted rather
+      // than painting (and uploading) a new one every frame.
+      const current = new Set(shown);
+      for (const p of shown) {
+        if (decals.has(p)) continue;
+        const key = keyOf(p);
+        for (const [q, d] of decals) {
+          if (current.has(q) || d.key !== key) continue;
+          decals.delete(q);
+          decals.set(p, d);
+          break;
+        }
+      }
+      for (const p of shown) paintDecal(p);
       for (const [p, d] of decals) {
         if (d.seen) continue;
         group.remove(d.mesh);

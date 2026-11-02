@@ -1472,10 +1472,11 @@ export function boot(joining, net) {
       vans,
       rings: open.map((o) => ({ x: o.house.dropX, y: o.house.dropY, gold: o.gold })),
       beacons: open.map((o) => ({ ...R.matAt(o.house), gold: o.gold })),
-      paint: [
+      // The same objects every frame: the road paint is painted once.
+      paint: (tw.paint ||= [
         { lines: ['RIGHT', 'TURNS', 'ONLY'], x: 5.5 * T, y: 4.15 * T, upright: true, width: 112, max: 80, stretch: 1.45, alpha: 1 },
         { arrow: true, x: 5.5 * T, y: 2.45 * T, alpha: 1 },
-      ],
+      ]),
     };
   }
 
