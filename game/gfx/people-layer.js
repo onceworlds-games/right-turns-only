@@ -29,6 +29,7 @@ export function createPeopleLayer(R) {
   const greets = []; // residents at their doors
   const strollers = [];
   const dogs = new Map(); // house id → dog
+  const kennel = new Map(); // kind → dogs out of sight, kept for reuse
   loadModels().then(() => {
     ready = true;
   });
@@ -55,7 +56,6 @@ export function createPeopleLayer(R) {
   function release(rig) {
     if (!rig) return;
     group.remove(rig.root);
-    rig.mixer.stopAllAction();
     rig.carry && rig.root.remove(rig.carry);
     rig.carry = null;
     const free = pool.get(rig.kind) || [];
@@ -372,7 +372,8 @@ export function createPeopleLayer(R) {
       if (!near) {
         if (dog) {
           group.remove(dog.rig.root);
-          dog.rig.dispose();
+          dog.rig.stop();
+          (kennel.get(dog.kind) || kennel.set(dog.kind, []).get(dog.kind)).push(dog.rig);
           dogs.delete(h.id);
         }
         continue;
@@ -380,12 +381,15 @@ export function createPeopleLayer(R) {
       if (!dog) {
         if (dogs.size >= MAX_DOGS) continue;
         const kind = DOG_KINDS[h.id % DOG_KINDS.length];
-        const rig = spawnRigged(lib.dogs.get(kind), { scale: 1.7 });
+        // Dogs that went out of sight wait in the kennel for the next garden.
+        const spare = kennel.get(kind);
+        const rig = (spare && spare.pop()) || spawnRigged(lib.dogs.get(kind), { scale: 1.7 });
+        rig.root.rotation.y = 0;
         group.add(rig.root);
         // The garden runs along the street, between the door and the pavement.
         const fx = Math.cos(hs.ry);
         const fz = -Math.sin(hs.ry);
-        dog = { rig, home: [hs.mat[0] + Math.sin(hs.ry) * 0.85, hs.mat[1] + Math.cos(hs.ry) * 0.85], ax: [fx, fz], s: 0, v: 0, bark: 0 };
+        dog = { rig, kind, home: [hs.mat[0] + Math.sin(hs.ry) * 0.85, hs.mat[1] + Math.cos(hs.ry) * 0.85], ax: [fx, fz], s: 0, v: 0, bark: 0 };
         dog.rig.root.position.set(dog.home[0], hs.y, dog.home[1]);
         dogs.set(h.id, dog);
       }
@@ -441,6 +445,8 @@ export function createPeopleLayer(R) {
         d.rig.dispose();
       }
       dogs.clear();
+      for (const list of kennel.values()) for (const rig of list) rig.dispose();
+      kennel.clear();
     },
     frame(view) {
       if (!ready || !city) return;
