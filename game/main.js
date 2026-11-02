@@ -1409,6 +1409,7 @@ export function boot(joining, net) {
     else if ((S.mode === 'solo' || S.mode === 'soloResults') && S.solo) view = soloView(dt);
     else if (S.mode === 'scramble' && S.net && S.net.world) view = scrambleView(dt);
     if (!view) {
+      R.clear(PALETTE.asphalt);
       g.setTransform(1, 0, 0, 1, 0, 0);
       g.fillStyle = PALETTE.asphalt;
       g.fillRect(0, 0, R.cv.width, R.cv.height);

@@ -194,17 +194,23 @@ export function createPost(renderer) {
   const keyOf = (m) => `post${m.id}.${m.version}`;
   /** Whether any of the chain's programs isn't built yet. */
   post.cold = (done) => chain.some(([m]) => !done.has(keyOf(m)));
-  post.warmOne = (done) => {
+  const started = new Set();
+  post.warmOne = (done, parallel = false) => {
     for (const [m, toScreen] of chain) {
       const key = keyOf(m);
       if (done.has(key)) continue;
-      done.add(key);
-      quad.material = m;
-      renderer.setRenderTarget(toScreen ? null : post.targets.halfA);
-      for (const mat of renderer.compile(scene, cam)) {
-        const program = renderer.properties.get(mat).currentProgram;
-        if (program) program.getUniforms();
+      if (!started.has(key)) {
+        started.add(key);
+        quad.material = m;
+        renderer.setRenderTarget(toScreen ? null : post.targets.halfA);
+        renderer.compile(scene, cam);
+        if (parallel) return true;
       }
+      // Read back once linked (see the renderer's warm-up); without the extension the read waits for it.
+      const program = renderer.properties.get(m).currentProgram;
+      if (parallel && program && !program.isReady()) continue;
+      if (program) program.getUniforms();
+      done.add(key);
       return true;
     }
     return false;

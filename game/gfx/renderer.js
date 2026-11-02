@@ -117,7 +117,7 @@ export function createRenderer(hud, opts = {}) {
   function findCold(state) {
     cold.length = 0;
     scene.traverse((o) => {
-      if (cold.length >= 64 || !(o.isMesh || o.isPoints || o.isLine || o.isSprite) || !o.material) return;
+      if (!(o.isMesh || o.isPoints || o.isLine || o.isSprite) || !o.material) return;
       const one = !Array.isArray(o.material);
       const was = one ? ready.get(o) : null;
       if (was && was.m === o.material && was.v === o.material.version && was.s === state && was.c === !!o.instanceColor && was.g === o.geometry) return;
@@ -142,28 +142,70 @@ export function createRenderer(hud, opts = {}) {
     }
     return true;
   }
+  // With KHR_parallel_shader_compile (most browsers, SwiftShader too) a link runs off the page: a program is started in one
+  // task and only read back once it says it's done, so the page never waits on one. Without it, the read waits.
+  const parallel = renderer.extensions.has('KHR_parallel_shader_compile');
+  const linking = new Map(); // object → the materials it started, for the state in `linkingFor`
+  let linkingFor = '';
+  const isReady = (m) => {
+    const program = renderer.properties.get(m).currentProgram;
+    return !program || program.isReady();
+  };
   function warmTask() {
     warmQueued = false;
     const low = warmFor === 'L';
     if (!low && !post.targets) return;
+    if (linkingFor !== warmFor) {
+      linking.clear();
+      linkingFor = warmFor;
+    }
     // The renderer as the frame draws.
     renderer.shadowMap.enabled = !low;
     renderer.toneMapping = low ? THREE.NeutralToneMapping : THREE.NoToneMapping;
     const end = performance.now() + 8;
-    if (!low) while (post.warmOne(built)) if (performance.now() > end) return;
+    if (!low) while (post.warmOne(built, parallel)) if (performance.now() > end) return;
     findCold(warmFor);
     renderer.setRenderTarget(low ? null : post.targets.scene);
     for (const o of cold) {
-      for (const m of renderer.compile(o, camera, scene)) {
-        const program = renderer.properties.get(m).currentProgram;
-        if (program) program.getUniforms(); // waits for the link
+      let mats = linking.get(o);
+      if (!mats) {
+        // Built as it will be drawn, even while it's hidden for now.
+        const was = o.visible;
+        o.visible = true;
+        mats = [...renderer.compile(o, camera, scene)];
+        o.visible = was;
+        if (parallel) linking.set(o, mats);
       }
+      if (parallel && !mats.every(isReady)) {
+        if (performance.now() > end) break;
+        continue;
+      }
+      for (const m of mats) {
+        const program = renderer.properties.get(m).currentProgram;
+        if (program) program.getUniforms(); // linked by now (or, without the extension, waits for it)
+      }
+      linking.delete(o);
       o.traverse((c) => {
         if (c.material) for (const m of Array.isArray(c.material) ? c.material : [c.material]) built.add(warmFor + variant(c, m));
       });
       if (performance.now() > end) break;
     }
     renderer.setRenderTarget(null);
+  }
+  // The frame is still drawn while some are building, without the objects that wait on them: a page that stops drawing its
+  // canvas can stop getting animation frames (a capture's virtual clock, some browsers' throttling), and the rest of the
+  // scene is better than a frozen one.
+  const hidden = [];
+  function hideCold() {
+    for (const o of cold) {
+      if (!o.visible) continue;
+      o.visible = false;
+      hidden.push(o);
+    }
+  }
+  function showCold() {
+    for (const o of hidden) o.visible = true;
+    hidden.length = 0;
   }
 
   if (import.meta.env.DEV) R.debugWarm = () => ({ cold: cold.map((o) => `${o.type}:${o.name}:${o.visible}:${[].concat(o.material).map((m) => `${m.type}${m.id}.${m.version}`).join(',')}:${o.parent ? o.parent.type : '-'}`), built: built.size, queued: warmQueued, warmFor, post: post.cold(built), targets: !!post.targets, keys: cold.slice(0, 4).map((o) => [].concat(o.material).map((m) => [warmFor + variant(o, m), built.has(warmFor + variant(o, m)), o.matrixWorld.elements[13].toFixed(1), o.frustumCulled, !!o.geometry.boundingSphere])) });
@@ -596,6 +638,14 @@ export function createRenderer(hud, opts = {}) {
     if (d) d.target = open ? -1.6 : 0;
   };
 
+  /** A frame with nothing to show still draws the canvas (see hideCold). */
+  R.clear = (color = '#34383F') => {
+    renderer.setRenderTarget(null);
+    renderer.setClearColor(color, 1);
+    renderer.clear();
+    renderer.setClearColor(0x000000, 0);
+  };
+
   R.frame = (view) => {
     const now = performance.now();
     R.dt = Math.min(0.1, R.last ? (now - R.last) / 1000 : 0.016);
@@ -603,7 +653,7 @@ export function createRenderer(hud, opts = {}) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, hud.width, hud.height);
     const city = R.city;
-    if (!city || !R.town) return;
+    if (!city || !R.town) return R.clear();
     const t = view.t || 0;
     R.t = t;
     R.view = view;
@@ -648,13 +698,20 @@ export function createRenderer(hud, opts = {}) {
     renderer.toneMapping = low ? THREE.NeutralToneMapping : THREE.NoToneMapping;
     renderer.toneMappingExposure = low ? st.exposure : 1;
     if (!low) post.resize(Math.round(R.w * R.pr), Math.round(R.h * R.pr), R.quality === 'high' ? 4 : 0);
-    // While programs are still being built the frame isn't drawn: the last one stays up.
+    // While programs are still being built, what waits on them is left out of the frame (R.drawn: all of it was drawn).
     R.drawn = !warm(low);
-    if (R.drawn) {
-      if (low) {
-        renderer.setRenderTarget(null);
-        renderer.render(scene, camera);
-      } else post.render(scene, camera, { threshold: st.night > 0.5 ? 0.85 : 1.6, blurRadius: 1.4 });
+    if (low) {
+      renderer.setRenderTarget(null);
+      hideCold();
+      renderer.render(scene, camera);
+      showCold();
+    } else if (post.cold(built)) {
+      // The chain itself isn't built yet (the first frames): the sky colour, not a frozen canvas.
+      R.clear(scene.fog.color);
+    } else {
+      hideCold();
+      post.render(scene, camera, { threshold: st.night > 0.5 ? 0.85 : 1.6, blurRadius: 1.4 });
+      showCold();
     }
     // World-anchored 2D: name tags and rising numbers.
     ctx.setTransform(R.pr, 0, 0, R.pr, 0, 0);
