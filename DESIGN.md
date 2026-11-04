@@ -45,7 +45,7 @@ A first-time player (no save) who is alone in the room goes from Play straight i
 | Time | Screen | Hint (road paint, then gone) |
 |---|---|---|
 | 0 s | **Title.** The camera hangs over a wide street with RIGHT TURNS ONLY painted on the asphalt in giant road-marking letters around a painted right-turn arrow. Bot vans curl through the shot, deliver to lit houses, loop a roundabout. One big Play sign. | none |
-| ~2 s | Tap Play (or Space). Sound starts. A first-timer alone drops straight into Maple Row: the camera settles on the depot for a 1.3 s intro, then a horn and GO. | none |
+| ~2 s | The room joined: the yard, with the platform's Ready strip. Ready: the platform's 3-2-1, then the shift at once ("HOLD TO TURN RIGHT" the first time). The Route sign has Maple Row for a first solo run: the camera settles on the depot for a 1.3 s intro, then a horn and GO. | none |
 | 3 s | The van rolls out of the depot with three parcels on its roof rack. Lit houses with rings on the road; yellow edge arrows point at the ones off screen. The clock sign starts. | `HOLD TO TURN RIGHT` painted on the road ahead |
 | ~6 s | The first junction. Holding blinks the right indicator (tick-tock) and the van curls round; let go near the new road and it straightens by itself. Missing it bumps a kerb (a short stall). | |
 | ~10 s | First ring: the parcel flies to the porch, thud, +1, the manifest ticks. | |
@@ -65,9 +65,9 @@ turning: `HOLD TO TURN`). Hints are short stacked words painted on the road, at 
 | Turn right (hold) | Space, →, D, or hold the left mouse button anywhere | Hold anywhere on the screen |
 | Pause (solo) | Esc, P | the platform menu pauses |
 | Restart shift (solo) | R | Again on the pause card |
-| Next town (solo results) | Enter | the NEXT TOWN sign |
+| Next town (solo results) | N | the NEXT TOWN sign |
 | Watching a scramble | click to follow the next van | tap |
-| Menus | Enter / Space on the focused sign, Esc back | tap |
+| Menus | Space on the main sign, Esc back (Enter is the platform's Ready) | tap |
 
 No stick, no touch buttons: `ow.controls.set(null)` everywhere, and the whole screen is the button. `touch-action: none`,
 `user-select: none`, `-webkit-touch-callout: none`, pointer events with capture, so a long hold never selects or opens a callout.
@@ -144,9 +144,9 @@ the same every time, so times compare, ghosts make sense and boards are fair.
   A change clears ready flags.
 - **Lobby and ready-up:** the yard. The platform's bar draws Ready (public: everyone readies and the room counts down) or Start
   (a private server's host, lit when `room.canStart`). Joining never starts anything.
-- **A match** = 3 shifts in 3 different towns (picked by `match.random`). The platform's countdown runs before shift 1. Each
-  shift's round is the shift plus a 3 s intro at its start (123 s or 183 s): the whole town from above, the open addresses
-  lit, a big 3-2-1 (time to plan), then a horn and GO.
+- **A match** = 3 shifts in 3 different towns (picked by `match.random`). The platform's countdown runs before shift 1, which starts
+  at once. A shift's round leaves room for 3 s (123 s or 183 s): shifts 2 and 3 begin with the whole town from above, the open
+  addresses lit (time to plan, no numerals), then a horn and GO.
 - **Play:** every van starts at the depot with 3 parcels. Open addresses are lit for everyone: 3 for 1-2 vans, 4 for 3-4,
   5 for 5-6. **The first van through a ring takes it**: 1 point, +1 on the mat. A replacement lights up at once, never within
   480 px of any van. Reload at the depot. Vans bump each other harmlessly (a honk and a nudge).
@@ -348,12 +348,12 @@ and node-tested).
 
 1. **Title.** Full screen: the attract scene, a street of its own (`TITLE_TOWN`) with RIGHT TURNS ONLY painted big on the
    asphalt round a painted curling arrow, bot vans delivering and looping the mini-roundabouts, the camera drifting. The title
-   is the road paint itself. Lower centre: the Play sign, a round blue mandatory-direction sign with the white curl and PLAY
+   is the road paint itself. Captures only since 2026-11: players go straight to the yard. It had a Play sign, a round blue sign with the white curl and PLAY
    under it (112 px on phones, 136 px on big screens, 96 px on short landscape screens). Nothing else.
 2. **The yard (lobby and hub).** The depot's forecourt in 3D, seen from the street.
    - Six numbered bays painted on the concrete under the depot's gantry, in one row (two staggered rows in portrait). Each
      seat's van stands in its bay in its seat colour, with its body and topper; an open seat keeps a dull stock van. Over each
-     van: a name pill with the seat symbol (yours yellow), a courier cap on the host's, a green READY chip. A van hops when its
+     van: a name pill with the seat symbol (yours yellow), a courier cap on the host's, no ready marks (the platform's bar counts those). A van hops when its
      player readies.
    - The courier's card top left: rank and title with its bar, the streak flame, today's three jobs with their progress.
    - Settings: two green signposts top right, `TOWNS / MIXED` and `SHIFT / 2:00`. Tap to cycle (the host, in the lobby);
@@ -387,7 +387,7 @@ and node-tested).
    - Top centre: three traffic cones for the shifts, the current one lit.
    - Name tags over vans. A rival heading for an open address within ~500 px gets a chevron in its colour at that ring's edge
      (at most two per ring), so you can see a race coming.
-   - Intro: the town's name and a big 3-2-1 over the whole town. `LAST CALL ×3` when the golden address lights up.
+   - Shifts 2 and 3 open on the town's name over the whole town, no numerals; shift 1 shows the name a moment as it starts. `LAST CALL ×3` when the golden address lights up.
    - Watching: the camera follows the leader, tap for the next van, `WATCHING · NEXT SHIFT` at the bottom.
 8. **Between shifts.** The whole town from above with every van's trail in its colour, `SHIFT n DONE`, the plates. 7 s.
 9. **Results (scramble).** The podium on the depot forecourt: three plinths (gold, silver, bronze), the top three vans on them
@@ -398,7 +398,7 @@ and node-tested).
    marked. The final time huge, the doormat sum or the par under it, stars stamping in, `NEW BEST` painted at the depot. Under
    them the pay slip: the tips count up with a coin tick (DRIVING, STARS, NEW TOWN, NEW BEST, CHALLENGE, JOBS chips), the
    rank bar fills (a rank up stamps the new title), today's jobs tick off, the medal, the streak chip and `NEW IN THE GARAGE`.
-   Signs: AGAIN (Space), NEXT TOWN (Enter), YARD (Esc). In landscape the numbers sit in a column on the right.
+   Signs: AGAIN (Space), NEXT TOWN (N), YARD (Esc). In landscape the numbers sit in a column on the right.
 11. **Pause (solo).** A band across the middle reads PAUSED, with RESUME (Esc), RESTART (R) and YARD.
 12. **Room closed.** A band with one line and one sign that reloads the page (removed / connection lost / another tab).
 

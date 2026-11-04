@@ -42,7 +42,7 @@
     },
     {
       "keys": [
-        "Enter"
+        "N"
       ],
       "action": "Next town"
     },

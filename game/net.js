@@ -14,26 +14,24 @@ import { TOPPERS, WRAPS } from './career.js';
 
 export const SETTINGS = [
   { id: 'towns', label: 'Towns', options: [{ value: 'mixed', label: 'Mixed' }, { value: 'easy', label: 'Easy' }, { value: 'hard', label: 'Hard' }], default: 'mixed' },
-  // A shift's round includes its 3 s intro (the town from above, the addresses lit), so 2:00 of driving is 123 s.
+  // A shift's round has room for a 3 s look at the town from above before it (shifts 2 and 3), so 2:00 of driving is 123 s.
   { id: 'shift', label: 'Shift', options: [{ value: 120 + SCRAMBLE.intro, label: '2:00' }, { value: 180 + SCRAMBLE.intro, label: '3:00' }], default: 120 + SCRAMBLE.intro },
 ];
 
-/** Seconds of driving in this shift so far (the round's first seconds are the intro). */
-export const shiftTime = (m) => Math.max(0, m.elapsed / 1000 - SCRAMBLE.intro);
+/**
+ * Seconds of driving in this shift so far. The first shift of a match starts at once, straight off the platform's 3-2-1. Later
+ * shifts begin with a look at the town from above, the addresses lit (no numerals).
+ */
+export const shiftTime = (m) => Math.max(0, m.elapsed / 1000 - (m.round > 1 ? SCRAMBLE.intro : 0));
 
 /** Join the room as the page loads, then load the helpers. Null when there's no platform. */
-export async function connect(ow, onJoin, opts = {}) {
+export async function connect(ow, opts = {}) {
   if (!ow || !ow.rooms) return null;
   let room;
   try {
     room = await ow.rooms.join({ maxPlayers: 6, minPlayers: 1, lobby: 'bar', settings: SETTINGS });
   } catch {
     return null;
-  }
-  try {
-    if (onJoin) onJoin(room);
-  } catch {
-    /* the page's business */
   }
   let helpers = null;
   const HELPERS = '/__onceworlds/v1/';

@@ -81,12 +81,6 @@ export function boot(joining, net) {
   }
 
   const ui = createUI(document.getElementById('ui'), {
-    play: () => {
-      audio.unlock();
-      audio.play('click');
-      if (!S.profile.played && (!S.net || S.net.room.players.size <= 1)) startSolo(TOWNS[0]);
-      else toYard();
-    },
     route: () => (audio.play('click'), toRoute()),
     daily: () => (audio.play('click'), toDaily()),
     garage: () => (audio.play('click'), toGarage()),
@@ -116,6 +110,11 @@ export function boot(joining, net) {
     yard: () => toYard(),
     resume: () => resume(),
     restart: () => restartSolo(),
+  });
+
+  // A clicked sign doesn't keep the focus, or Enter (the platform's Ready) would press it again.
+  document.getElementById('ui').addEventListener('mousedown', (e) => {
+    if (e.target.closest && e.target.closest('button')) e.preventDefault();
   });
 
   // ------------------------------------------------------------ sizing, fonts, platform
@@ -182,6 +181,8 @@ export function boot(joining, net) {
   }
   /** DOM screens placed around the platform's pieces are placed again when those (or the window) move. */
   function relayout() {
+    // The screens end above the platform's strip while it's up.
+    document.documentElement.style.setProperty('--bottom', `max(${bottomInset(false)}px, env(safe-area-inset-bottom))`);
     if (S.mode === 'yard') renderYardUI();
   }
   addEventListener('resize', resize);
@@ -225,7 +226,6 @@ export function boot(joining, net) {
     const room = net.room;
     room.on('close', (reason) => closed(reason));
     if (net.match) {
-      net.match.on('change', () => lobbyStrip());
       net.match.on('results', (standings, mine) => onResults(standings, mine));
       net.onDrop = (res, p) => onMyDrop(res, p);
       net.onGrabWon = () => award('finders-keepers');
@@ -236,7 +236,7 @@ export function boot(joining, net) {
         fx.add('text', { x: w.me.van.x, y: w.me.van.y - 20, text: 'TAKEN', color: '#D9573B', size: 28 });
       };
     }
-    lobbyStrip();
+    if (S.mode === 'yard') renderYardUI();
   }
   if (ow) {
     if (net !== undefined) attach(net);
@@ -287,21 +287,6 @@ export function boot(joining, net) {
     }
   }
 
-  /** The platform's Ready strip: only on the yard. */
-  function lobbyStrip() {
-    const room = S.net && S.net.room;
-    if (!room || !room.hideLobby) return;
-    const hide = S.mode !== 'yard';
-    const key = `${hide}|${room.match ? `${room.match.phase}:${room.match.id}` : ''}`;
-    if (key === S.stripKey) return;
-    S.stripKey = key;
-    try {
-      room.hideLobby(hide);
-    } catch {
-      /* older rooms */
-    }
-  }
-
   // ------------------------------------------------------------ input
 
   const HOLD_KEYS = new Set(['Space', 'ArrowRight', 'KeyD']);
@@ -320,13 +305,10 @@ export function boot(joining, net) {
       return;
     }
     if (e.code === 'KeyR' && (S.mode === 'solo' || S.mode === 'soloResults')) return restartSolo();
-    if (e.code === 'Enter' && S.mode === 'soloResults') {
-      e.preventDefault();
-      return nextTown();
-    }
-    // Space or Enter press the screen's main sign when nothing has the focus.
+    if (e.code === 'KeyN' && S.mode === 'soloResults') return nextTown();
+    // Space presses the screen's main sign when nothing has the focus. (Enter is the platform's Ready.)
     const focused = document.activeElement && document.activeElement.tagName === 'BUTTON';
-    if ((e.code === 'Space' || e.code === 'Enter') && !focused && S.mode !== 'yard' && S.mode !== 'garage') {
+    if (e.code === 'Space' && !focused && S.mode !== 'yard' && S.mode !== 'garage') {
       const main = document.querySelector('#ui .play, #ui .sign.blue');
       if (main) {
         e.preventDefault();
@@ -369,9 +351,9 @@ export function boot(joining, net) {
   function setMode(mode) {
     S.mode = mode;
     clearInput();
-    lobbyStrip();
   }
 
+  /** Captures only (never between a player and the lobby): the painted street on its own. */
   function toTitle() {
     setMode('title');
     if (!S.title) {
@@ -384,7 +366,7 @@ export function boot(joining, net) {
       for (let i = 0; i < 60 * 8; i++) S.title.world.step();
     }
     R.setCity(S.title.world.city);
-    ui.title();
+    ui.clear('title');
     audio.music('sunny', true);
   }
 
@@ -658,6 +640,7 @@ export function boot(joining, net) {
       flowPop: 0,
     };
     S.profile.played = true;
+    S.profile.driven = true;
     setMode('solo');
     ui.clear('solo');
     // The ghost of the best run.
@@ -1127,6 +1110,8 @@ export function boot(joining, net) {
   function toScramble() {
     setMode('scramble');
     ui.clear('scramble');
+    audio.duck(false); // a paused solo run ends here
+    audio.unlock();
     fx.clear();
     S.scr.follow = null;
   }
@@ -1170,6 +1155,7 @@ export function boot(joining, net) {
       S.scr.prevAddrs = null;
       if (S.autoDriver) S.autoDriver = createDriver({ skill: 1, seed: 5 });
       fx.clear();
+      if (m.round === 1) audio.play('go'); // straight off the platform's countdown; later shifts have their look at the town first
       if (w) {
         const fit = fitTown(w.city);
         Object.assign(S.cam, { x: fit.x, y: fit.y, zoom: fit.zoom });
@@ -1178,6 +1164,8 @@ export function boot(joining, net) {
     }
     if (phase === 'roundEnd' && S.lastPhase !== 'roundEnd') {
       audio.play('whistle');
+      S.profile.driven = true;
+      saveProfile();
       // Rush Hour: first place in a shift with 3 or more vans.
       const d = net.lastData;
       if (d && net.playing() && m.seats.length >= 3) {
@@ -1211,7 +1199,6 @@ export function boot(joining, net) {
       // Clock ticks and the last call.
       const left = Math.ceil(m.secondsLeft);
       if (left <= 10 && left !== S.scr.lastSecond && left > 0) audio.play('countdown');
-      if (st <= 0 && left !== S.scr.lastSecond && m.elapsed > 200) audio.play('countdown');
       if (st > 0 && S.scr.wasIntro) audio.play('go');
       S.scr.wasIntro = st <= 0;
       S.scr.lastSecond = left;
@@ -1375,7 +1362,7 @@ export function boot(joining, net) {
   function bottomInset(lobby) {
     let b = 12;
     for (const r of reservedRects()) {
-      if (r.kind === 'lobby' && lobby) b = Math.max(b, S.h - r.y);
+      if (r.kind === 'lobby') b = Math.max(b, S.h - r.y);
       if (r.kind === 'menu' && r.y > S.h / 2) b = Math.max(b, S.h - r.y);
     }
     if (lobby && !reservedRects().some((r) => r.kind === 'lobby')) b = Math.max(b, 96);
@@ -1455,7 +1442,7 @@ export function boot(joining, net) {
       tw.world.step();
     }
     const city = tw.world.city;
-    // Frame the painted title on the avenue, above the Play sign.
+    // Frame the painted title on the avenue.
     const zoom = clamp(Math.min((S.h * (S.h < 500 ? 0.36 : 0.42)) / 210, S.w < S.h ? S.w / 300 : S.w / 1050), 0.45, 2);
     const f = S.h < 500 ? 0.3 : 0.36;
     const target = { x: 5.5 * T + Math.sin(S.t * 0.25) * 10, y: 4.15 * T + ((0.5 - f) * S.h) / zoom, zoom };
@@ -1614,11 +1601,9 @@ export function boot(joining, net) {
     if (ex) targets.push({ kind: 'gold', x: ex.house.dropX, y: ex.house.dropY });
     arrowsFor(g, targets, w.van, [box, { x: cx - r, y: cy - r, w: r * 2, h: r * 2 + 30 }, flowBox, tipBox]);
     if (so.phase === 'intro') {
-      const n = Math.ceil(1.3 - so.t);
       outlined(g, so.town.name.toUpperCase(), S.w / 2, S.h * 0.34, Math.min(72, S.w / 9), '#F4F1E8');
       if (so.daily !== undefined) outlined(g, 'DAILY SHIFT', S.w / 2, S.h * 0.34 + 54, 28, '#FFC22E');
       else outlined(g, `PAR ${fmtTime(so.par)}`, S.w / 2, S.h * 0.34 + 54, 28, '#FFC22E');
-      if (n > 0) outlined(g, 'READY', S.w / 2, S.h * 0.62, 40, '#F4F1E8');
     }
   }
 
@@ -1646,7 +1631,7 @@ export function boot(joining, net) {
     const w = net.world;
     const city = w.city;
     const st = shiftTime(m);
-    const intro = m.phase === 'round' && st <= 0;
+    const intro = m.phase === 'round' && m.round > 1 && st <= 0;
     const between = m.phase === 'roundEnd';
     const playing = net.playing();
     const others = net.others();
@@ -1794,10 +1779,11 @@ export function boot(joining, net) {
       S.scr.platesBottom = plates(g, S.w - plateW - 14, cy + r + 14, shown, plateW);
       shiftCones(g, S.w / 2, topInset() + 22, m.round, m.rounds);
     }
-    if (intro && net.world) {
-      outlined(g, net.world.town.name.toUpperCase(), S.w / 2, S.h * 0.42, Math.min(72, S.w / 9), '#F4F1E8');
-      outlined(g, String(Math.max(1, Math.ceil(SCRAMBLE.intro - m.elapsed / 1000))), S.w / 2, S.h * 0.58, 96, '#FFC22E');
-    }
+    // The town's name: over the town between shifts, a moment into the first (which starts straight off the platform's countdown).
+    const st = shiftTime(m);
+    if (net.world && (intro || (m.phase === 'round' && st < 2))) outlined(g, net.world.town.name.toUpperCase(), S.w / 2, S.h * (intro ? 0.42 : 0.24), Math.min(intro ? 72 : 52, S.w / 9), '#F4F1E8');
+    // A first-timer can go straight here from the yard: the one thing to know.
+    if (playing && m.phase === 'round' && !S.profile.driven && st < 15) outlined(g, 'HOLD TO TURN RIGHT', S.w / 2, S.h - bottomInset(false) - 44, Math.min(34, S.w / 12), '#FFC22E');
     if (!intro && !between && focus) {
       const targets = [];
       if (playing && w.me.p <= 0) targets.push({ kind: 'depot', x: w.city.depot.x, y: w.city.depot.y });
@@ -1953,6 +1939,8 @@ export function boot(joining, net) {
           toScramble();
         }
       }
+      // Readying, or a countdown, leaves the menus: everyone is back in the yard for the start.
+      if ((m.phase === 'countdown' || net.room.me?.ready) && (S.mode === 'garage' || S.mode === 'route' || S.mode === 'card' || S.mode === 'daily' || S.mode === 'soloResults')) toYard();
       if (S.mode === 'yard' && S.t - (S.yardRefresh || 0) > 0.5) {
         S.yardRefresh = S.t;
         const sig = JSON.stringify([net.room.settings, net.room.isHost, m.phase === 'lobby', net.playing()]);
@@ -1984,7 +1972,7 @@ export function boot(joining, net) {
     if (S.mode !== 'solo' && S.mode !== 'scramble') audio.drive(false, 0, false, 0);
   }
 
-  // Start. A page that comes back (a reload) into a shift under way goes straight to it: no title town built for nothing.
+  // Start: straight to the yard, or (a reload) into a shift under way. The room is joined by now (start.js).
   const to = params.get('autoplay-to');
   const begin = () => {
     if (autoplay && params.get('scramble') === '1') {
@@ -2005,14 +1993,13 @@ export function boot(joining, net) {
     } else if (autoplay) {
       const id = Number(params.get('town')) || 1;
       startSolo(TOWNS.find((t) => t.id === id) || TOWNS[0]);
-    } else if (to === 'lobby') toYard();
-    else {
+    } else if (!production && (to === 'title' || params.get('title') === '1')) {
+      audio.unlock(); // footage of the title with its music
+      toTitle();
+    } else {
       const m = S.net && S.net.match;
       if (m && S.net.playing() && (m.phase === 'round' || m.phase === 'roundEnd' || m.phase === 'results')) toScramble();
-      else {
-        if (!production && params.get('title') === '1') audio.unlock(); // footage of the title with its music
-        toTitle();
-      }
+      else toYard();
     }
     last = performance.now();
     requestAnimationFrame(frame);
@@ -2032,6 +2019,7 @@ function defaultProfile() {
     wins: 0,
     hints: {},
     played: false,
+    driven: false, // has driven anything: a solo run or a whole shift (the first shift says how to turn)
     daily: null,
     // The career (see career.js).
     xp: 0,

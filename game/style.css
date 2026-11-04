@@ -26,8 +26,6 @@ canvas#cv { z-index: 1; }
 
 button { font-family: var(--font); cursor: pointer; border: 0; padding: 0; background: none; color: inherit; touch-action: manipulation; }
 button:focus-visible { outline: 4px solid var(--yellow); outline-offset: 4px; }
-.play:focus-visible { outline: none; }
-.play:focus-visible .play-disc { border-color: var(--yellow); }
 
 .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--top) 16px var(--bottom); }
 .screen.hidden { display: none; }
@@ -46,13 +44,6 @@ button:focus-visible { outline: 4px solid var(--yellow); outline-offset: 4px; }
 @media (pointer: coarse) { .key { display: none; } }
 
 /* Title */
-.play { position: absolute; left: 50%; bottom: calc(var(--bottom) + 9vh); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.play-disc { width: 112px; height: 112px; border-radius: 50%; background: var(--blue); border: 6px solid var(--paint); box-shadow: 0 0 0 4px var(--ink), 0 10px 0 4px rgba(0,0,0,0.35); display: grid; place-items: center; transition: transform 0.08s; }
-.play:active .play-disc { transform: translateY(4px); }
-.play-disc svg { width: 70%; height: 70%; }
-.play-label { font-size: 34px; font-weight: 900; letter-spacing: 0.08em; color: var(--paint); text-shadow: 0 0 6px var(--ink), 0 3px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink); display: flex; align-items: center; gap: 10px; }
-@media (min-width: 700px) and (min-height: 600px) { .play-disc { width: 136px; height: 136px; } .play-label { font-size: 40px; } }
-@media (max-height: 450px) { .play { bottom: calc(var(--bottom) + 4px); } .play-disc { width: 96px; height: 96px; } .play-label { font-size: 28px; } }
 
 /* Yard */
 .yard-top { position: absolute; top: var(--top); right: 16px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 180px); }

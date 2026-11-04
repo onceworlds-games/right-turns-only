@@ -5,8 +5,6 @@ import { VAN_BODIES } from './config.js';
 import { TOWNS } from './towns.js';
 import { fmtTime } from './hud.js';
 
-const CURL_SVG =
-  '<svg viewBox="-50 -50 100 100" aria-hidden="true"><path d="M -30 22 A 31 31 0 1 1 31 12" fill="none" stroke="#F4F1E8" stroke-width="15"/><path d="M 14 6 L 48 6 L 31 34 Z" fill="#F4F1E8"/></svg>';
 const STAR_SVG = (on) =>
   `<svg class="star${on ? ' on' : ''}" viewBox="-12 -12 24 24" aria-hidden="true"><path d="M0,-11 L3.2,-3.6 L11,-3.4 L4.8,1.6 L7,9.4 L0,5 L-7,9.4 L-4.8,1.6 L-11,-3.4 L-3.2,-3.6 Z" fill="#FFC22E" stroke="#141A22" stroke-width="2" stroke-linejoin="round"/></svg>`;
 
@@ -72,23 +70,6 @@ export function createUI(root, h) {
   ui.clear = (name = '') => {
     root.replaceChildren(toastEl);
     ui.name = name;
-  };
-
-  ui.title = () => {
-    const s = screen('title');
-    const b = el('button', 'play hit');
-    b.type = 'button';
-    b.setAttribute('aria-label', 'Play');
-    const disc = el('span', 'play-disc');
-    setSvg(disc, CURL_SVG);
-    const label = el('span', 'play-label', 'PLAY');
-    label.append(el('span', 'key', 'Space'));
-    b.append(disc, label);
-    b.addEventListener('click', (e) => {
-      e.stopPropagation();
-      h.play();
-    });
-    s.append(b);
   };
 
   /** The yard: settings posts, the Route and Daily signs, your van, invite. */
@@ -331,7 +312,7 @@ export function createUI(root, h) {
     row.style.justifyContent = 'center';
     const again = sign('blue', 'AGAIN', h.again, 'Space');
     row.append(again);
-    if (d.next) row.append(sign('green', 'NEXT TOWN', h.next, 'Enter'));
+    if (d.next) row.append(sign('green', 'NEXT TOWN', h.next, 'N'));
     row.append(sign('white', 'YARD', h.yard, 'Esc'));
     s.append(row);
     return {

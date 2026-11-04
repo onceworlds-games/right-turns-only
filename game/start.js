@@ -15,14 +15,6 @@ if (params.has('poster')) {
 } else if (ow) {
   const joining = connect(
     ow,
-    (room) => {
-      // The Ready strip only belongs on the yard (it shows it): hide it at once, before the game loads.
-      try {
-        if (room.hideLobby) room.hideLobby(true);
-      } catch {
-        /* older rooms */
-      }
-    },
     // Capture only: a one-shift match, straight to the podium.
     { shifts: !production && params.get('shifts') === '1' ? 1 : undefined },
   );
