@@ -640,7 +640,6 @@ export function boot(joining, net) {
       flowPop: 0,
     };
     S.profile.played = true;
-    S.profile.driven = true;
     setMode('solo');
     ui.clear('solo');
     // The ghost of the best run.
@@ -1783,7 +1782,7 @@ export function boot(joining, net) {
     const st = shiftTime(m);
     if (net.world && (intro || (m.phase === 'round' && st < 2))) outlined(g, net.world.town.name.toUpperCase(), S.w / 2, S.h * (intro ? 0.42 : 0.24), Math.min(intro ? 72 : 52, S.w / 9), '#F4F1E8');
     // A first-timer can go straight here from the yard: the one thing to know.
-    if (playing && m.phase === 'round' && !S.profile.driven && st < 15) outlined(g, 'HOLD TO TURN RIGHT', S.w / 2, S.h - bottomInset(false) - 44, Math.min(34, S.w / 12), '#FFC22E');
+    if (playing && m.phase === 'round' && !S.profile.driven && !S.profile.played && st < 15) outlined(g, 'HOLD TO TURN RIGHT', S.w / 2, S.h - bottomInset(false) - 44, Math.min(34, S.w / 12), '#FFC22E');
     if (!intro && !between && focus) {
       const targets = [];
       if (playing && w.me.p <= 0) targets.push({ kind: 'depot', x: w.city.depot.x, y: w.city.depot.y });
@@ -2019,7 +2018,7 @@ function defaultProfile() {
     wins: 0,
     hints: {},
     played: false,
-    driven: false, // has driven anything: a solo run or a whole shift (the first shift says how to turn)
+    driven: false, // has finished a shift (with `played`, a solo run: until then a shift says how to turn)
     daily: null,
     // The career (see career.js).
     xp: 0,
